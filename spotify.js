@@ -23,7 +23,7 @@ var SpotifyService = function (session) {
 
 
 SpotifyService.prototype.getLoginUrl = function () {
-    return 'https://accounts.spotify.com/authorize?client_id=' + this.apikeys.client_id + '&scope=user-read-private user-read-currently-playing user-read-playback-state user-library-read user-library-modify user-modify-playback-state&response_type=code&redirect_uri=' + encodeURI(this.apikeys.redirect_uri);
+    return 'https://accounts.spotify.com/authorize?client_id=' + this.apikeys.client_id + '&scope=user-read-private playlist-modify-public playlist-modify-private user-read-currently-playing user-read-playback-state user-library-read user-library-modify user-modify-playback-state&response_type=code&redirect_uri=' + encodeURI(this.apikeys.redirect_uri);
 }
 
 SpotifyService.prototype.authenticate = function (req) {
@@ -303,7 +303,7 @@ SpotifyService.prototype._request = function (method, path, payload, postData) {
                        data.artists = data.artists.map(formatObject);
                     }
                     data = formatObject(data, 0);
-                
+                    console.log(data);
                     resolve(data);
                 } catch (e) {
                     
@@ -638,7 +638,7 @@ SpotifyService.prototype.getTopTracksInCountry = function (code, limit, offset) 
 SpotifyService.prototype.reorderTracksInPlaylist = function (username, identifier, range_start, range_length, insert_before) {
     var self = this;
     return new Promise(function (resolve, fail) {
-        self._request('PUT', '/users/' + username + '/playlists/' + identifier + '/tracks', {
+        self._request('PUT', '/users/' + username + '/playlists/' + identifier + '/tracks', {}, {
             range_start: range_start,
             range_length: range_length,
             insert_before: insert_before
@@ -2316,6 +2316,91 @@ app.get('/search', function (req, res) {
 });
 
 
+app.get('/search/:query/track', function (req, res) {
+    music.req = req;
+    
+    music.session = req.session;
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+    music.search(req.query.q, req.query.limit, req.query.offset, 'track').then(function (result) {
+    
+        res.json(result);
+    }, function (reject) {
+        res.json(reject);
+    });
+});
+
+
+app.get('/search/:query/artist', function (req, res) {
+    music.req = req;
+    
+    music.session = req.session;
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+    music.search(req.query.q, req.query.limit, req.query.offset, 'artist').then(function (result) {
+    
+        res.json(result);
+    }, function (reject) {
+        res.json(reject);
+    });
+});
+
+
+app.get('/search/:query/release', function (req, res) {
+    music.req = req;
+    
+    music.session = req.session;
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+    music.search(req.query.q, req.query.limit, req.query.offset, 'album').then(function (result) {
+    
+        res.json(result);
+    }, function (reject) {
+        res.json(reject);
+    });
+});
+
+
+app.get('/search/:query/album', function (req, res) {
+    music.req = req;
+    
+    music.session = req.session;
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+    music.search(req.query.q, req.query.limit, req.query.offset, 'album').then(function (result) {
+    
+        res.json(result);
+    }, function (reject) {
+        res.json(reject);
+    });
+});
+
+
+app.get('/search/:query/playlist', function (req, res) {
+    music.req = req;
+    
+    music.session = req.session;
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+    music.search(req.query.q, req.query.limit, req.query.offset, 'playlist').then(function (result) {
+    
+        res.json(result);
+    }, function (reject) {
+        res.json(reject);
+    });
+});
+
+
 app.get('/user/:username/playlist/:identifier', function (req, res) {
     music.req = req;
     
@@ -2373,7 +2458,7 @@ app.put('/user/:username/playlist/:identifier/track', function (req, res) {
     if (req.body) {
         body = (req.body);
     }
-    music.reorderTracksInPlaylist(req.params.username, req.params.identifier, body.start_index, body.range_start, body.range_length, body.range_end).then(function (result) {
+    music.reorderTracksInPlaylist(req.params.username, req.params.identifier, body.range_start, body.range_length + 1, parseInt(body.insert_before)).then(function (result) {
         res.json(result);
     }, function (reject) {
         res.json(reject);
