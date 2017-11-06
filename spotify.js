@@ -72,6 +72,10 @@ SpotifyService.prototype.getCurrentUser = function () {
     var self = this;
     return new Promise(function (resolve, fail) {
         self._request('GET', '/me').then(function (result) {
+            result.artists = [
+                
+            ]
+            
             resolve(result);
         });
     })
@@ -213,7 +217,91 @@ SpotifyService.prototype._request = function (method, path, payload, postData) {
                    obj.p = payload.offset + i + 1; 
                    obj.service = service;
                    obj.version = '';
+                   if (obj.type == 'country') {
+                       obj.president = null;
+                        if (obj.id == 'qi') {
+                            obj.president = {
+                                id: 'drsounds',
+                                name: 'Dr. Sounds',
+                                uri: 'spotify:user:drsounds',
+                                images: [{
+                                    url: 'http://blog.typeandtell.com/sv/wp-content/uploads/sites/2/2017/06/Alexander-Forselius-dpi27-750x500.jpg'
+                                }],
+                                type: 'user'
+                            }   
+                        }
+                       
+                   }
                    
+                   if (obj.type == 'user') {
+                       obj.manages = [];
+                       obj.controls = []
+                       if (obj.id == 'buddhalow' || obj.id == 'buddhalowmusic' || obj.id == 'drsounds') {
+                           obj.president_of = [{
+                               id: 'qi',
+                               name: 'Qiland',
+                               uri: 'bungalow:country:qi',
+                               type: 'country'
+                           }];
+                            obj.manages.push({
+                                id: '2FOROU2Fdxew72QmueWSUy',
+                                type: 'artist',
+                                name: 'Dr. Sounds',
+                                uri: 'spotify:artist:2FOROU2Fdxew72QmueWSUy',
+                                images: [{
+                                    url: 'http://blog.typeandtell.com/sv/wp-content/uploads/sites/2/2017/06/Alexander-Forselius-dpi27-750x500.jpg'
+                                }]
+                            });
+                            obj.manages.push({
+                                id: "1yfKXBG0YdRc5wrAwSgTBj",
+                                name: "Buddhalow",
+                                uri: "spotify:artist:1yfKXBG0YdRc5wrAwSgTBj",
+                                type: "artist",
+                                images: [{
+                                    url: 'https://static1.squarespace.com/static/580c9426bebafb840ac7089e/t/580d061de3df28929ead74ac/1477248577786/_MG_0082.jpg?format=1500w'
+                                }]
+                            });
+                        }
+                   }
+                   if (obj.type == 'artist') {
+                       obj.users = [];
+                        obj.labels = [];
+                       if (obj.id == '2FOROU2Fdxew72QmueWSUy') {
+                           obj.users.push({
+                               id: 'drsounds',
+                               name: 'Dr. Sounds',
+                               type: 'user',
+                               url: 'spotify:user:drsounds'
+                           });
+                           obj.labels.push({
+                               id: 'buddhalowmusic',
+                               name: 'Buddhalow Music',
+                               type: 'label',
+                               uri: 'spotify:label:buddhalowmusic'
+                           });
+                           obj.labels.push({
+                               id: 'drsounds',
+                               name: 'Dr. Sounds',
+                               type: 'label',
+                               uri: 'spotify:label:drsounds'
+                           });
+                           obj.labels.push({
+                               id: 'recordunion',
+                               name: 'Record Union',
+                               type: 'label',
+                               uri: 'spotify:label:recordunion'
+                           });
+                           obj.labels.push({
+                               id: 'substream',
+                               name: 'Substream',
+                               type: 'label',
+                               uri: 'spotify:label:substream'
+                           });
+                       }
+                       
+                       
+                   }
+                  
                    if ('duration_ms' in obj) {
                        obj.duration = obj.duration_ms / 1000;
                    }
@@ -861,7 +949,9 @@ SpotifyService.prototype.getPlaylistsInCategory = function (id, offset, limit) {
             offset: offset,
             limit: limit
         }).then(function (result) {
-           resolve(result); 
+           resolve({
+               objects: result.playlists.items
+           }); 
         }, function (err) {
             fail(err);
         });
@@ -1876,6 +1966,49 @@ SpotifyService.prototype.getAlbumTracks = function (id) {
 };
 
 
+SpotifyService.prototype.getFolders = function (id) {
+
+    var self = this;
+    var promise = new Promise(function (resolve, fail) {
+        self._request("GET", "/me/folders").then(function (data) {
+            resolve(data);
+        }, function (err) {
+            fail(err);
+        });
+    });
+    return promise;
+};
+
+SpotifyService.prototype.getFolderById = function (id) {
+
+    var self = this;
+    var promise = new Promise(function (resolve, fail) {
+        self._request("GET", "/me/folders/" + id).then(function (data) {
+            resolve(data);
+        }, function (err) {
+            fail(err);
+        });
+    });
+    return promise;
+};
+
+
+
+SpotifyService.prototype.getPlaylistsInFolder = function (id) {
+
+    var self = this;
+    var promise = new Promise(function (resolve, fail) {
+        self._request("GET", "/me/folders/" + id).then(function (data) {
+            resolve(data);
+        }, function (err) {
+            fail(err);
+        });
+    });
+    return promise;
+};
+
+
+
 SpotifyService.prototype.search = function (query, offset, limit, type) {
     var self = this;
     var promise = new Promise(function (resolve, fail) {
@@ -2038,10 +2171,8 @@ app.get('/authenticate', function (req, res) {
         res.statusCode = 200;
         res.json(success);
         res.end();
-    }, function (error) {
-        console.log(error);
-        res.statusCode = 500;
-        res.end(error);
+    }, function (err) {
+        res.status(err).send({error: err});
     });
 
 }); 
@@ -2057,11 +2188,27 @@ app.get('/user/:username/playlist', function (req, res) {
     music.getPlaylistsByUser(req.params.username, req.query.offset, req.query.limit).then(function (result) {
     
         res.json(result);
-    }, function (reject) {
-        res.json(reject);
+    }, function (err) {
+        res.status(err).send({error: err});
     });
 });
 
+
+app.get('/label/:username/playlist', function (req, res) {
+    
+    music.req = req;
+    music.session = req.session;
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+    music.getPlaylistsByUser(req.params.username, req.query.offset, req.query.limit).then(function (result) {
+    
+        res.json(result);
+    }, function (err) {
+        res.status(err).send({error: err});
+    });
+});
 
 app.get('/user/:username', function (req, res) {
     music.req = req;
@@ -2074,8 +2221,8 @@ app.get('/user/:username', function (req, res) {
     music.getUser(req.params.username).then(function (result) {
     
         res.json(result);
-    }, function (reject) {
-        res.json(reject);
+    }, function (err) {
+        res.status(err).send({error: err});
     });
 });
 
@@ -2091,8 +2238,8 @@ app.get('/curator/:username/playlist', function (req, res) {
     music.getPlaylistsByUser(req.params.username, req.query.offset, req.query.limit).then(function (result) {
     
         res.json(result);
-    }, function (reject) {
-        res.json(reject);
+    }, function (err) {
+        res.status(err).send({error: err});
     });
 });
 
@@ -2108,8 +2255,8 @@ app.get('/curator/:username', function (req, res) {
     music.getUser(req.params.username).then(function (result) {
     
         res.json(result);
-    }, function (reject) {
-        res.json(reject);
+    }, function (err) {
+        res.status(err).send({error: err});
     });
 });
 
@@ -2124,11 +2271,26 @@ app.get('/me/playlist', function (req, res) {
     music.getMyPlaylists(req.query.offset, req.query.limit).then(function (result) {
     
         res.json(result);
-    }, function (reject) {
-        res.json(reject);
+    }, function (err) {
+        res.status(err).send({error: err});
     });
 });
 
+app.get('/me/folder', function (req, res) {
+    music.req = req;
+    
+    music.session = req.session;
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+    music.getFolders(req.query.offset, req.query.limit).then(function (result) {
+    
+        res.json(result);
+    }, function (err) {
+        res.status(err).send({error: err});
+    });
+});
 
 app.get('/me/release', function (req, res) {
     music.req = req;
@@ -2141,8 +2303,8 @@ app.get('/me/release', function (req, res) {
     music.getMyReleases(req.query.offset, req.query.limit).then(function (result) {
     
         res.json(result);
-    }, function (reject) {
-        res.json(reject);
+    }, function (err) {
+        res.status(err).send({error: err});
     });
 });
 
@@ -2180,9 +2342,8 @@ app.put('/me/player/play', function (req, res) {
             res.json(result);
             
         });
-    }, function (reject) {
-        res.statusCode = reject;
-        res.json(reject);
+    }, function (err) {
+        res.status(err).send({error: err});
     });
 });
 
@@ -2198,8 +2359,8 @@ app.get('/me/player/currently-playing', function (req, res) {
     music.getCurrentTrack(body).then(function (result) {
     
         res.json(result);
-    }, function (reject) {
-        res.json(reject);
+    }, function (err) {
+        res.status(err).send({error: err});
     });
 });
 
@@ -2216,9 +2377,8 @@ app.get('/internal/library/track', function (req, res) {
     music.getMyTracks(req.query.offset, req.query.limit).then(function (result) {
     
         res.json(result);
-    }, function (reject) {
-        res.statusCode = reject;
-        res.json(reject);
+    }, function (err) {
+        res.status(err).send({error: err});
     });
 });
 
@@ -2233,9 +2393,8 @@ app.get('/category', function (req, res) {
     music.getCategories(req.query.offset, req.query.limit).then(function (result) {
     
         res.json(result);
-    }, function (reject) {
-        res.statusCode = reject;
-        res.json(reject);
+    }, function (err) {
+        res.status(err).send({error: err});
     });
 });
 
@@ -2251,22 +2410,27 @@ app.get('/category/:identifier', function (req, res) {
     music.getCategory(req.params.identifier, req.query.offset, req.query.limit).then(function (result) {
     
         res.json(result);
-    }, function (reject) {
-        res.json(reject);
+    }, function (err) {
+        res.status(err).send({error: err});
     });
 });
 
 
 app.get('/label/:identifier', function (req, res) {
-    wiki.req = req;
+    /*wiki.req = req;
     var name = decodeURIComponent(req.params.identifier);
     wiki.describe(name).then(function (description) {
         res.json({
             name: name,
             description: description || ''
         });
+    });*/
+    res.json({
+        id: req.params.identifier,
+        name: req.params.identifier
     });
 });
+
 
 
 
@@ -2276,8 +2440,7 @@ app.get('/label/:identifier/release', function (req, res) {
     music.search('label:"' + req.params.identifier + '"', req.params.limit, req.params.offset, 'album').then(function (result) {
         res.json(result);
     }, function (err) {
-        res.statusCode = err;
-        res.json(err);
+        res.status(err).send({error: err});
     });
 });
 
@@ -2290,11 +2453,11 @@ app.get('/category/:identifier/playlist', function (req, res) {
     if (req.body) {
         body = (req.body);
     }
-    music.getPlaylistInCategory(req.params.identifier, req.query.offset, req.query.limit).then(function (result) {
+    music.getPlaylistsInCategory(req.params.identifier, req.query.offset, req.query.limit).then(function (result) {
     
         res.json(result);
-    }, function (reject) {
-        res.json(reject);
+    }, function (err) {
+        res.status(err).send({error: err});
     });
 });
 
@@ -2310,8 +2473,8 @@ app.get('/search', function (req, res) {
     music.search(req.query.q, req.query.limit, req.query.offset, req.query.type).then(function (result) {
     
         res.json(result);
-    }, function (reject) {
-        res.json(reject);
+    }, function (err) {
+        res.status(err).send({error: err});
     });
 });
 
@@ -2327,8 +2490,8 @@ app.get('/search/:query/track', function (req, res) {
     music.search(req.query.q, req.query.limit, req.query.offset, 'track').then(function (result) {
     
         res.json(result);
-    }, function (reject) {
-        res.json(reject);
+    }, function (err) {
+        res.status(err).send({error: err});
     });
 });
 
@@ -2361,8 +2524,8 @@ app.get('/search/:query/release', function (req, res) {
     music.search(req.query.q, req.query.limit, req.query.offset, 'album').then(function (result) {
     
         res.json(result);
-    }, function (reject) {
-        res.json(reject);
+    }, function (err) {
+        res.status(err).send({error: err});
     });
 });
 
@@ -2378,8 +2541,8 @@ app.get('/search/:query/album', function (req, res) {
     music.search(req.query.q, req.query.limit, req.query.offset, 'album').then(function (result) {
     
         res.json(result);
-    }, function (reject) {
-        res.json(reject);
+    }, function (err) {
+        res.status(err).send({error: err});
     });
 });
 
@@ -2395,8 +2558,8 @@ app.get('/search/:query/playlist', function (req, res) {
     music.search(req.query.q, req.query.limit, req.query.offset, 'playlist').then(function (result) {
     
         res.json(result);
-    }, function (reject) {
-        res.json(reject);
+    }, function (err) {
+        res.status(err).send({error: err});
     });
 });
 
@@ -2412,8 +2575,8 @@ app.get('/user/:username/playlist/:identifier', function (req, res) {
     music.getPlaylist(req.params.username, req.params.identifier).then(function (result) {
         
         res.json(result);
-    }, function (reject) {
-        res.json(reject);
+    }, function (err) {
+        res.status(err).send({error: err});
     });
 });
 
@@ -2428,9 +2591,9 @@ app.get('/user/:username/playlist/:identifier/track', function (req, res) {
     }
     music.getTracksInPlaylist(req.params.username, req.params.identifier, req.query.offset, req.query.limit).then(function (result) {
         res.json(result);
-    }, function (reject) {
-        res.json(reject);
-    });
+    }, function (err) {
+        res.status(err).send({error: err});
+    }});
 });
 
 
@@ -2444,8 +2607,8 @@ app.post('/user/:username/playlist/:identifier/track', function (req, res) {
     }
     music.addTracksInPlaylist(req.params.username, req.params.identifier, body.tracks, body.position).then(function (result) {
         res.json(result);
-    }, function (reject) {
-        res.json(reject);
+    }, function (err) {
+        res.status(err).send({error: err});
     });
 });
 
@@ -2460,8 +2623,8 @@ app.put('/user/:username/playlist/:identifier/track', function (req, res) {
     }
     music.reorderTracksInPlaylist(req.params.username, req.params.identifier, body.range_start, body.range_length + 1, parseInt(body.insert_before)).then(function (result) {
         res.json(result);
-    }, function (reject) {
-        res.json(reject);
+    }, function (err) {
+        res.status(err).send({error: err});
     });
 });
 
@@ -2476,8 +2639,8 @@ app.get('/artist/:identifier', function (req, res) {
     }
     music.getArtist(req.params.identifier).then(function (result) {
         res.json(result);
-    }, function (reject) {
-        res.json(reject);
+    }, function (err) {
+        res.status(err).send({error: err});
     });
 });
 
@@ -2485,7 +2648,11 @@ app.get('/artist/:identifier/info', function (req, res) {
     music.getArtist(req.params.identifier).then(function (result) {
         musicInfo.getArtistInfo(result.name).then(function (artistInfo) {
            res.json(artistInfo);
+        }, function (err) {
+            res.status(err).send({error: err});
         });
+    }, function (err) {
+        res.status(err).send({error: err});
     });
 })
 
@@ -2530,7 +2697,7 @@ app.get('/artist/:identifier/about', function (req, res) {
                     }
                     res.json(data);
                 }, function (err) {
-                    res.json(data);
+                    res.status(reject).send({error: reject});
                 });
                 return;
             }
@@ -2548,10 +2715,10 @@ app.get('/artist/:identifier/about', function (req, res) {
             };
             res.json(data);
         }, function (err) {
-            res.json(data);
+            res.status(reject).send({error: reject});
         });
     }, function (reject) {
-        res.json(reject);
+        res.status(reject).send({error: reject});
     });
 });
 
@@ -2582,9 +2749,9 @@ app.get('/artist/:identifier/top/:count', function (req, res) {
             res.json(err);
         });
     }, function (reject) {
-        res.json(reject);
+        res.status(reject).send({error: reject});
     }, function (err) {
-        res.statusCode = 500;
+        res.status(reject).send({error: reject});
         res.json(err);
     });
 });
@@ -2598,12 +2765,12 @@ app.get('/artist/:identifier/top/:count/track', function (req, res) {
     if (req.body) {
         body = (req.body);
     }
-    music.getTopTracksForArtist(req.params.identifier, req.params.offset, req.params.limit).then(function (result) {
+    music.getTopTracksForArtist(req.params.identifier, 'se', req.params.offset, req.params.limit).then(function (result) {
        result.objects = result.objects.slice(0, req.params.count);
        res.json(result);
         res.end();
     }, function (reject) {
-        res.json(reject);
+        res.status(reject).send({error: reject});
         res.end();
     });
 });
@@ -2621,7 +2788,7 @@ app.get('/artist/:identifier/release', function (req, res) {
         res.json(result);
         res.end();
     }, function (reject) {
-        res.json(reject);
+        res.status(reject).send({error: reject});
         res.end();
     });
 });
@@ -2640,7 +2807,7 @@ app.get('/artist/:identifier/album', function (req, res) {
         res.json(result);
         res.end();
     }, function (reject) {
-        res.json(reject);
+        res.status(reject);
         res.end();
     });
 });
@@ -2660,7 +2827,7 @@ app.get('/artist/:identifier/single', function (req, res) {
         res.json(result);
         res.end();
     }, function (reject) {
-        res.json(reject);
+        res.status(reject).send({error: reject});
         res.end();
     });
 });
@@ -2679,7 +2846,7 @@ app.get('/artist/:identifier/appears_on', function (req, res) {
         res.json(result);
         res.end();
     }, function (reject) {
-        res.json(reject);
+        res.status(reject).send({error: reject});
         res.end();
     });
 });
@@ -2698,7 +2865,7 @@ app.get('/artist/:identifier/compilation', function (req, res) {
         res.json(result);
         res.end();
     }, function (reject) {
-        res.json(reject);
+        res.status(reject).send({error: reject});
         res.end();
     });
 });
@@ -2716,7 +2883,7 @@ app.get('/album/:identifier', function (req, res) {
         res.json(result);
         res.end();
     }, function (reject) {
-        res.json(reject);
+        res.status(reject).send({error: reject});
         res.end();
     });
 });
@@ -2734,7 +2901,7 @@ app.get('/album/:identifier/track', function (req, res) {
         res.json(result);
         res.end();
     }, function (reject) {
-        res.json(reject);
+        res.status(reject).send({error: reject});
         res.end();
     });
 });
@@ -2753,7 +2920,7 @@ app.get('/country/:identifier', function (req, res) {
         res.json(result);
         res.end();
     }, function (reject) {
-        res.json(reject);
+        res.status(reject).send({error: reject});
         res.end();
     });
 });
@@ -2772,7 +2939,7 @@ app.get('/country/:identifier/top/:limit', function (req, res) {
         res.json(result);
         res.end();
     }, function (reject) {
-        res.json(reject);
+        res.status(reject).send({error: reject});
         res.end();
     });
 });
@@ -2791,7 +2958,7 @@ app.get('/country/:identifier/top/:limit/track', function (req, res) {
         res.json(result);
         res.end();
     }, function (reject) {
-        res.json(reject);
+        res.status(reject).send({error: reject});
         res.end();
     });
 });
@@ -2820,14 +2987,14 @@ app.get('/track/:identifier', function (req, res) {
         res.json(result);
         res.end();
     }, function (reject) {
-        res.json(reject);
+        res.status(reject).send({error: reject});
         res.end();
     });
 })
 
 app.get('/genre/:identifier/playlist', function (req, res) {
     music.req = req;
-    music.getPlaylistInCategory(req.params.identifier).then(function (result) {
+    music.getPlaylistsInCategory(req.params.identifier).then(function (result) {
         res.json(result);
         res.end();
     }, function (reject) {
@@ -2836,6 +3003,16 @@ app.get('/genre/:identifier/playlist', function (req, res) {
     });
 })
 
+app.get('/genre/:identifier', function (req, res) {
+    music.req = req;
+    music.getCategory(req.params.identifier).then(function (result) {
+        res.json(result);
+        res.end();
+    }, function (reject) {
+        res.status(reject).send({error: reject});
+        res.end();
+    });
+})
 
 module.exports = app;
 
