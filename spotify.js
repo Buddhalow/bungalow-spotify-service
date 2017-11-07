@@ -5,19 +5,25 @@ var express = require('express');
 var assign = require('object-assign');
 var Promise = require("es6-promise").Promise;
 var queryString = require('query-string');
-
+var api_key_file = os.homedir() + '/.bungalow/spotify.key.json';
+var cache_file = os.homedir() + '/.bungalow/spotify.cache.json';
 var SpotifyService = function (session) {
+    
     var self = this;
     this.cache = {};
     this.isPlaying = false;
     
     this.resources = {};
     this.callbacks = {};
-    this.apikeys = JSON.parse(fs.readFileSync(os.homedir() + '/.bungalow/spotify.key.json'));
+    this.apikeys = JSON.parse(fs.readFileSync(api_key_file));
     this.accessToken = null;
     this.session = session;
 
     this.me = null;
+    this.cache = {};
+    if (fs.existsSync(cache_file)) {
+        this.cache = JSON.parse(fs.readFileSync(cache_file));
+    }
 
 };
 
@@ -102,7 +108,7 @@ SpotifyService.prototype.setAccessToken = function (req, accessToken) {
 
     accessToken.time = new Date().getTime();
     console.log(accessToken);
-    //fs.writeFileSync(os.homedir() + '/.bungalow/spotify_access_token.json', JSON.stringify(accessToken));
+    fs.writeFileSync(os.homedir() + '/.bungalow/spotify_access_token.json', JSON.stringify(accessToken));
     req.session.spotifyAccessToken = accessToken;
     
 }
@@ -187,6 +193,13 @@ SpotifyService.prototype._request = function (method, path, payload, postData) {
         
         
         var token = self.getAccessToken();
+        
+        if (method === 'GET', self.cache instanceof Object && path in self.cache) {
+            var result = self.cache[path];
+            resolve(result);
+            return;
+        }
+        
         if (!token) {
             fail(401);
             return;
@@ -392,7 +405,11 @@ SpotifyService.prototype._request = function (method, path, payload, postData) {
                     }
                     data = formatObject(data, 0);
                     console.log(data);
+                    data.updated_at = new Date().getTime();
+                    self.cache[path] = data;
+                    fs.writeFileSync(cache_file, JSON.stringify(self.cache));
                     resolve(data);
+                    
                 } catch (e) {
                     
                     fail(e);
@@ -437,7 +454,8 @@ SpotifyService.prototype.getArtist = function (id) {
  **/
 SpotifyService.prototype.getReleasesByArtist = function (id, release_type, offset, limit) {
     var self = this;
-    if (!release_type) release_type = 'album';
+    
+    if (!release_type || release_type == "release") release_type = 'single,album';
     return new Promise(function (resolve, fail) {
         self._request('GET', '/artists/' + id + '/albums', {
             offset: offset,
@@ -2593,7 +2611,7 @@ app.get('/user/:username/playlist/:identifier/track', function (req, res) {
         res.json(result);
     }, function (err) {
         res.status(err).send({error: err});
-    }});
+    });
 });
 
 
@@ -2784,7 +2802,7 @@ app.get('/artist/:identifier/release', function (req, res) {
         body = (req.body);
     }
     
-    music.getReleasesByArtist(req.params.identifier, 'album', req.query.offset, req.query.limit).then(function (result) {
+    music.getReleasesByArtist(req.params.identifier, 'release', req.query.offset, req.query.limit).then(function (result) {
         res.json(result);
         res.end();
     }, function (reject) {
