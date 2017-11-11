@@ -193,7 +193,7 @@ SpotifyService.prototype._request = function (method, path, payload, postData) {
         
         
         var token = self.getAccessToken();
-        var cachePath = '(offset:' + payload.offset + ',limit:' + payload.limit + ')';
+        var cachePath = path + '?offset=' + payload.offset + '&limit=' + payload.limit + '';
         if (method === 'GET', self.cache instanceof Object && cachePath in self.cache) {
             var result = self.cache[cachePath];
             resolve(result);
