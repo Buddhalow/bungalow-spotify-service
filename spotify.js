@@ -32,37 +32,36 @@ SpotifyService.prototype.getLoginUrl = function () {
     return 'https://accounts.spotify.com/authorize?client_id=' + this.apikeys.client_id + '&scope=user-read-private playlist-modify-public playlist-modify-private user-read-currently-playing user-read-playback-state user-library-read user-library-modify user-modify-playback-state&response_type=code&redirect_uri=' + encodeURI(this.apikeys.redirect_uri);
 }
 
-SpotifyService.prototype.authenticate = function (req) {
+SpotifyService.prototype.authenticate = function (req, resolve, fail) {
     var self = this;
     this.req = req;
     console.log(req);
-    return new Promise(function (resolve, fail) {
-        console.log("Ta");
-        request({
-            url: 'https://accounts.spotify.com/api/token',
-            method: 'POST',
-            form: {
-                grant_type: 'authorization_code',
-                code: req.query.code,
-                redirect_uri: self.apikeys.redirect_uri 
-            },
-            headers: {
-                'Authorization': 'Basic ' + new Buffer(self.apikeys.client_id + ':' + self.apikeys.client_secret).toString('base64') 
-            }
-        }, function (error, response, body) {
-            console.log(error);
-            var body = JSON.parse(body);
-            if (error || !body.access_token) {
-                fail(error);
-                return;
-            }
-            self.setAccessToken(req, body);
-            self.getCurrentUser().then(function (result) {
-                self.setMe(result);
-                resolve(result, body);
-            });
+    console.log("Ta");
+    request({
+        url: 'https://accounts.spotify.com/api/token',
+        method: 'POST',
+        form: {
+            grant_type: 'authorization_code',
+            code: req.query.code,
+            redirect_uri: self.apikeys.redirect_uri 
+        },
+        headers: {
+            'Authorization': 'Basic ' + new Buffer(self.apikeys.client_id + ':' + self.apikeys.client_secret).toString('base64') 
+        }
+    }, function (error, response, body) {
+        console.log(error);
+        var body = JSON.parse(body);
+        if (error || !body.access_token) {
+            fail(error);
+            return;
+        }
+        self.setAccessToken(req, body);
+        self.getCurrentUser(function (result) {
+            self.setMe(result);
+            resolve(result, body);
         });
     });
+    
     
 }
 
@@ -74,26 +73,24 @@ SpotifyService.prototype.getMe = function (me) {
     return this.req.session.me;
 }
 
-SpotifyService.prototype.getCurrentUser = function () {
+SpotifyService.prototype.getCurrentUser = function (resolve, fail) {
     var self = this;
-    return new Promise(function (resolve, fail) {
-        self._request('GET', '/me').then(function (result) {
+        self._request('GET', '/me', {}, {}, function (result) {
             result.artists = [
                 
-            ]
+            ];
             
             resolve(result);
-        });
-    })
+        }, fail);
+
 }
 
-SpotifyService.prototype.getCurrentTrack = function () {
+SpotifyService.prototype.getCurrentTrack = function (resolve, fail) {
     var self = this;
-    return new Promise(function (resolve, fail) {
-        self._request('GET', '/me/player/currently-playing').then(function (result) {
-            resolve(result);
-        });
-    })
+    self._request('GET', '/me/player/currently-playing', {}, {}, function (result) {
+        resolve(result);
+    });
+
 }
 
 SpotifyService.prototype.getAccessToken = function () {
@@ -781,16 +778,15 @@ SpotifyService.prototype.getTracksInPlaylist = function (username, identifier, o
  **/
 SpotifyService.prototype.getTracksInAlbum = function (identifier, offset, limit, resolve, fail) {
     var self = this;
-    return new Promise(function (resolve, fail) {
-        self._request('GET', '/albums/' + identifier + '/tracks', {
-            offset: offset,
-            limit: limit
-        }, {}, function (result) {
-           resolve(result); 
-        }, function (err) {
-            fail(err);
-        });
+    self._request('GET', '/albums/' + identifier + '/tracks', {
+        offset: offset,
+        limit: limit
+    }, {}, function (result) {
+       resolve(result); 
+    }, function (err) {
+        fail(err);
     });
+
 }
 
 
@@ -2748,7 +2744,7 @@ app.get('/artist/:identifier/album', function (req, res) {
         res.end();
     }, function (reject) {
         res.status(reject);
-        res.end();
+        res.json(reject);
     });
 });
 
