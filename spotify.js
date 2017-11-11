@@ -32,36 +32,37 @@ SpotifyService.prototype.getLoginUrl = function () {
     return 'https://accounts.spotify.com/authorize?client_id=' + this.apikeys.client_id + '&scope=user-read-private playlist-modify-public playlist-modify-private user-read-currently-playing user-read-playback-state user-library-read user-library-modify user-modify-playback-state&response_type=code&redirect_uri=' + encodeURI(this.apikeys.redirect_uri);
 }
 
-SpotifyService.prototype.authenticate = function (req, resolve, fail) {
+SpotifyService.prototype.authenticate = function (req) {
     var self = this;
     this.req = req;
     console.log(req);
-    console.log("Ta");
-    request({
-        url: 'https://accounts.spotify.com/api/token',
-        method: 'POST',
-        form: {
-            grant_type: 'authorization_code',
-            code: req.query.code,
-            redirect_uri: self.apikeys.redirect_uri 
-        },
-        headers: {
-            'Authorization': 'Basic ' + new Buffer(self.apikeys.client_id + ':' + self.apikeys.client_secret).toString('base64') 
-        }
-    }, function (error, response, body) {
-        console.log(error);
-        var body = JSON.parse(body);
-        if (error || !body.access_token) {
-            fail(error);
-            return;
-        }
-        self.setAccessToken(req, body);
-        self.getCurrentUser(function (result) {
-            self.setMe(result);
-            resolve(result, body);
+    return new Promise(function (resolve, fail) {
+        console.log("Ta");
+        request({
+            url: 'https://accounts.spotify.com/api/token',
+            method: 'POST',
+            form: {
+                grant_type: 'authorization_code',
+                code: req.query.code,
+                redirect_uri: self.apikeys.redirect_uri 
+            },
+            headers: {
+                'Authorization': 'Basic ' + new Buffer(self.apikeys.client_id + ':' + self.apikeys.client_secret).toString('base64') 
+            }
+        }, function (error, response, body) {
+            console.log(error);
+            var body = JSON.parse(body);
+            if (error || !body.access_token) {
+                fail(error);
+                return;
+            }
+            self.setAccessToken(req, body);
+            self.getCurrentUser().then(function (result) {
+                self.setMe(result);
+                resolve(result, body);
+            });
         });
     });
-    
     
 }
 
@@ -73,24 +74,26 @@ SpotifyService.prototype.getMe = function (me) {
     return this.req.session.me;
 }
 
-SpotifyService.prototype.getCurrentUser = function (resolve, fail) {
+SpotifyService.prototype.getCurrentUser = function () {
     var self = this;
-        self._request('GET', '/me', {}, {}, function (result) {
+    return new Promise(function (resolve, fail) {
+        self._request('GET', '/me').then(function (result) {
             result.artists = [
                 
-            ];
+            ]
             
             resolve(result);
-        }, fail);
-
+        });
+    })
 }
 
-SpotifyService.prototype.getCurrentTrack = function (resolve, fail) {
+SpotifyService.prototype.getCurrentTrack = function () {
     var self = this;
-    self._request('GET', '/me/player/currently-playing', {}, {}, function (result) {
-        resolve(result);
-    });
-
+    return new Promise(function (resolve, fail) {
+        self._request('GET', '/me/player/currently-playing').then(function (result) {
+            resolve(result);
+        });
+    })
 }
 
 SpotifyService.prototype.getAccessToken = function () {
@@ -178,384 +181,435 @@ SpotifyService.prototype.searchFor = function (q, type, offset, limit) {
 }
 
 
-SpotifyService.prototype._request = function (method, path, payload, postData, resolve, fail) {
+SpotifyService.prototype._request = function (method, path, payload, postData) {
     var self = this;
-    if (!payload) payload = {};
-    if (!payload.offset) payload.offset = 0;
-    if (!isNaN(payload.offset)) payload.offset = parseInt(payload.offset);
-    if (!payload.type) payload.type = 'track';
-    if (!isNaN(payload.limit)) payload.limit = parseInt(payload.limit);
-    if (!payload.limit) payload.limit = 30;
+    return new Promise(function (resolve, fail) {
+        if (!payload) payload = {};
+        if (!payload.offset) payload.offset = 0;
+        if (!isNaN(payload.offset)) payload.offset = parseInt(payload.offset);
+        if (!payload.type) payload.type = 'track';
+        if (!isNaN(payload.limit)) payload.limit = parseInt(payload.limit);
+        if (!payload.limit) payload.limit = 30;
+        
+        
+        var token = self.getAccessToken();
+        var cachePath = '(offset:' + payload.offset + ',limit:' + payload.limit + ')';
+        if (method === 'GET', self.cache instanceof Object && cachePath in self.cache) {
+            var result = self.cache[cachePath];
+            resolve(result);
+            return;
+        }
+        
+        if (!token) {
+            fail(401);
+            return;
+        }
+        var headers = {};
+        headers["Authorization"] = "Bearer " + token.access_token;
+        if (payload instanceof Object) {
+            headers["Content-type"] = "application/json";
     
-    
-    var token = self.getAccessToken();
-    var cachePath = '(offset:' + payload.offset + ',limit:' + payload.limit + ')';
-    if (method === 'GET', self.cache instanceof Object && cachePath in self.cache) {
-        var result = self.cache[cachePath];
-        resolve(result);
-        return;
-    }
-    
-    if (!token) {
-        fail(401);
-        return;
-    }
-    var headers = {};
-    headers["Authorization"] = "Bearer " + token.access_token;
-    if (payload instanceof Object) {
-        headers["Content-type"] = "application/json";
-
-    } else {
-        headers["Content-type"] = ("application/x-www-form-urlencoded");
-    }
-    var url = 'https://api.spotify.com/v1' + path;
-    request({
-            method: method,
-            url: url,
-            headers: headers,
-            qs: payload,
-            body: JSON.stringify(postData)
-        },
-        function (error, response, body) {
-            if (error) {
-                fail(error);
-                return;
-            }
-            function formatObject (obj, i) {
-               obj.position = payload.offset + i; 
-               obj.p = payload.offset + i + 1; 
-               obj.service = service;
-               obj.version = '';
-               if (obj.type == 'country') {
-                   obj.president = null;
-                    if (obj.id == 'qi') {
-                        obj.president = {
-                            id: 'drsounds',
-                            name: 'Dr. Sounds',
-                            uri: 'spotify:user:drsounds',
-                            images: [{
-                                url: 'http://blog.typeandtell.com/sv/wp-content/uploads/sites/2/2017/06/Alexander-Forselius-dpi27-750x500.jpg'
-                            }],
-                            type: 'user'
-                        }   
-                    }
-                   
-               }
-               
-               if (obj.type == 'user') {
-                   obj.manages = [];
-                   obj.controls = []
-                   if (obj.id == 'buddhalow' || obj.id == 'buddhalowmusic' || obj.id == 'drsounds') {
-                       obj.president_of = [{
-                           id: 'qi',
-                           name: 'Qiland',
-                           uri: 'bungalow:country:qi',
-                           type: 'country'
-                       }];
-                        obj.manages.push({
-                            id: '2FOROU2Fdxew72QmueWSUy',
-                            type: 'artist',
-                            name: 'Dr. Sounds',
-                            uri: 'spotify:artist:2FOROU2Fdxew72QmueWSUy',
-                            images: [{
-                                url: 'http://blog.typeandtell.com/sv/wp-content/uploads/sites/2/2017/06/Alexander-Forselius-dpi27-750x500.jpg'
-                            }]
-                        });
-                        obj.manages.push({
-                            id: "1yfKXBG0YdRc5wrAwSgTBj",
-                            name: "Buddhalow",
-                            uri: "spotify:artist:1yfKXBG0YdRc5wrAwSgTBj",
-                            type: "artist",
-                            images: [{
-                                url: 'https://static1.squarespace.com/static/580c9426bebafb840ac7089e/t/580d061de3df28929ead74ac/1477248577786/_MG_0082.jpg?format=1500w'
-                            }]
-                        });
-                    }
-               }
-               if (obj.type == 'artist') {
-                   obj.users = [];
-                    obj.labels = [];
-                   if (obj.id == '2FOROU2Fdxew72QmueWSUy') {
-                       obj.users.push({
-                           id: 'drsounds',
-                           name: 'Dr. Sounds',
-                           type: 'user',
-                           url: 'spotify:user:drsounds'
-                       });
-                       obj.labels.push({
-                           id: 'buddhalowmusic',
-                           name: 'Buddhalow Music',
-                           type: 'label',
-                           uri: 'spotify:label:buddhalowmusic'
-                       });
-                       obj.labels.push({
-                           id: 'drsounds',
-                           name: 'Dr. Sounds',
-                           type: 'label',
-                           uri: 'spotify:label:drsounds'
-                       });
-                       obj.labels.push({
-                           id: 'recordunion',
-                           name: 'Record Union',
-                           type: 'label',
-                           uri: 'spotify:label:recordunion'
-                       });
-                       obj.labels.push({
-                           id: 'substream',
-                           name: 'Substream',
-                           type: 'label',
-                           uri: 'spotify:label:substream'
-                       });
+        } else {
+            headers["Content-type"] = ("application/x-www-form-urlencoded");
+        }
+        var url = 'https://api.spotify.com/v1' + path;
+        request({
+                method: method,
+                url: url,
+                headers: headers,
+                qs: payload,
+                body: JSON.stringify(postData)
+            },
+            function (error, response, body) {
+                if (error) {
+                    fail(error);
+                    return;
+                }
+                function formatObject (obj, i) {
+                   obj.position = payload.offset + i; 
+                   obj.p = payload.offset + i + 1; 
+                   obj.service = service;
+                   obj.version = '';
+                   if (obj.type == 'country') {
+                       obj.president = null;
+                        if (obj.id == 'qi') {
+                            obj.president = {
+                                id: 'drsounds',
+                                name: 'Dr. Sounds',
+                                uri: 'spotify:user:drsounds',
+                                images: [{
+                                    url: 'http://blog.typeandtell.com/sv/wp-content/uploads/sites/2/2017/06/Alexander-Forselius-dpi27-750x500.jpg'
+                                }],
+                                type: 'user'
+                            }   
+                        }
+                       
                    }
                    
-                   
-               }
-              
-               if ('duration_ms' in obj) {
-                   obj.duration = obj.duration_ms / 1000;
-               }
-               if (obj.type === 'user') {
-                   obj.name = obj.id;
-               }
-               if ('track' in obj) {
-                   obj = assign(obj, obj.track);
-               }
-               if ('artists' in obj) {
-                   obj.artists = obj.artists.map(formatObject);
-               }
-               if ('album' in obj) {
-                   obj.album = formatObject(obj.album, 0);
-               }
-               if ('display_name' in obj) {
-                   obj.name = obj.display_name;
-               }
-               if (obj.name instanceof String && obj.name.indexOf('-') != -1) {
-                   obj.version = obj.substr(obj.indexOf('-') + '-'.length).trim();
-                   obj.name = obj.name.split('-')[0];
-               }
-               return obj;
-            }
-            try {
-                if (response.statusCode < 200 ||response.statusCode > 299) {
-                        console.log(body);
-                    fail(response.statusCode);
-                    return;
+                   if (obj.type == 'user') {
+                       obj.manages = [];
+                       obj.controls = []
+                       if (obj.id == 'buddhalow' || obj.id == 'buddhalowmusic' || obj.id == 'drsounds') {
+                           obj.president_of = [{
+                               id: 'qi',
+                               name: 'Qiland',
+                               uri: 'bungalow:country:qi',
+                               type: 'country'
+                           }];
+                            obj.manages.push({
+                                id: '2FOROU2Fdxew72QmueWSUy',
+                                type: 'artist',
+                                name: 'Dr. Sounds',
+                                uri: 'spotify:artist:2FOROU2Fdxew72QmueWSUy',
+                                images: [{
+                                    url: 'http://blog.typeandtell.com/sv/wp-content/uploads/sites/2/2017/06/Alexander-Forselius-dpi27-750x500.jpg'
+                                }]
+                            });
+                            obj.manages.push({
+                                id: "1yfKXBG0YdRc5wrAwSgTBj",
+                                name: "Buddhalow",
+                                uri: "spotify:artist:1yfKXBG0YdRc5wrAwSgTBj",
+                                type: "artist",
+                                images: [{
+                                    url: 'https://static1.squarespace.com/static/580c9426bebafb840ac7089e/t/580d061de3df28929ead74ac/1477248577786/_MG_0082.jpg?format=1500w'
+                                }]
+                            });
+                        }
+                   }
+                   if (obj.type == 'artist') {
+                       obj.users = [];
+                        obj.labels = [];
+                       if (obj.id == '2FOROU2Fdxew72QmueWSUy') {
+                           obj.users.push({
+                               id: 'drsounds',
+                               name: 'Dr. Sounds',
+                               type: 'user',
+                               url: 'spotify:user:drsounds'
+                           });
+                           obj.labels.push({
+                               id: 'buddhalowmusic',
+                               name: 'Buddhalow Music',
+                               type: 'label',
+                               uri: 'spotify:label:buddhalowmusic'
+                           });
+                           obj.labels.push({
+                               id: 'drsounds',
+                               name: 'Dr. Sounds',
+                               type: 'label',
+                               uri: 'spotify:label:drsounds'
+                           });
+                           obj.labels.push({
+                               id: 'recordunion',
+                               name: 'Record Union',
+                               type: 'label',
+                               uri: 'spotify:label:recordunion'
+                           });
+                           obj.labels.push({
+                               id: 'substream',
+                               name: 'Substream',
+                               type: 'label',
+                               uri: 'spotify:label:substream'
+                           });
+                       }
+                       
+                       
+                   }
+                  
+                   if ('duration_ms' in obj) {
+                       obj.duration = obj.duration_ms / 1000;
+                   }
+                   if (obj.type === 'user') {
+                       obj.name = obj.id;
+                   }
+                   if ('track' in obj) {
+                       obj = assign(obj, obj.track);
+                   }
+                   if ('artists' in obj) {
+                       obj.artists = obj.artists.map(formatObject);
+                   }
+                   if ('album' in obj) {
+                       obj.album = formatObject(obj.album, 0);
+                   }
+                   if ('display_name' in obj) {
+                       obj.name = obj.display_name;
+                   }
+                   if (obj.name instanceof String && obj.name.indexOf('-') != -1) {
+                       obj.version = obj.substr(obj.indexOf('-') + '-'.length).trim();
+                       obj.name = obj.name.split('-')[0];
+                   }
+                   return obj;
                 }
-                if (body == "") {
-                    resolve({
-                        status: response.statusCode
-                    });
-                    return;
-                }
-                var data = JSON.parse(body);
-                if (!data) {
-                    console.log(body);
-                    fail(response.statusCode);
-                }
-                if ('error' in data || !data) {
-                    console.log(body);
-                    fail(response.statusCode);
-                    return;
-                }
-                data.service = {
-                    name: 'Spotify',
-                    id: 'spotify',
-                    type: 'service',
-                    description: ''
-                }
-                if ('items' in data) {
-                    data.objects = data.items;
-                    delete data.items;
-                }
-                if ('tracks' in data) {
-                    if (data.tracks instanceof Array) {
-                        data.objects = data.tracks;
-                    } else {
-                        data.objects = data.tracks.items;
+                try {
+                    if (response.statusCode < 200 ||response.statusCode > 299) {
+                            console.log(body);
+                        fail(response.statusCode);
+                        return;
                     }
-                    delete data.tracks;
+                    if (body == "") {
+                        resolve({
+                            status: response.statusCode
+                        });
+                        return;
+                    }
+                    var data = JSON.parse(body);
+                    if (!data) {
+                        console.log(body);
+                        fail(response.statusCode);
+                    }
+                    if ('error' in data || !data) {
+                        console.log(body);
+                        fail(response.statusCode);
+                        return;
+                    }
+                    data.service = {
+                        name: 'Spotify',
+                        id: 'spotify',
+                        type: 'service',
+                        description: ''
+                    }
+                    if ('items' in data) {
+                        data.objects = data.items;
+                        delete data.items;
+                    }
+                    if ('tracks' in data) {
+                        if (data.tracks instanceof Array) {
+                            data.objects = data.tracks;
+                        } else {
+                            data.objects = data.tracks.items;
+                        }
+                        delete data.tracks;
+                    }
+                    if (!('images' in data)) {
+                        data.images = [{
+                            url: ''
+                        }];
+                    }
+                    if ('album' in data) {
+                        data.album = formatObject(data.album);
+                        delete data.albums;
+                    }
+                    
+                    if ('owner' in data) {
+                        data.owner = formatObject(data.owner);
+                        delete data.albums;
+                    }
+                    if ('artists' in data) {
+                        data.objects = data.artists.items;
+                    }
+                    if ('objects' in data && data.objects) {
+                        data.objects = data.objects.map(formatObject);
+                       
+                    }
+                    if ('artists' in data && data.type == 'album') {
+                       data.artists = data.artists.map(formatObject);
+                    }
+                    data = formatObject(data, 0);
+                    console.log(data);
+                    data.updated_at = new Date().getTime();
+                    self.cache[cachePath] = data;
+                    fs.writeFileSync(cache_file, JSON.stringify(self.cache));
+                    resolve(data);
+                    
+                } catch (e) {
+                    
+                    fail(e);
                 }
-                if (!('images' in data)) {
-                    data.images = [{
-                        url: ''
-                    }];
-                }
-                if ('album' in data) {
-                    data.album = formatObject(data.album);
-                    delete data.albums;
-                }
-                
-                if ('owner' in data) {
-                    data.owner = formatObject(data.owner);
-                    delete data.albums;
-                }
-                if ('artists' in data) {
-                    data.objects = data.artists.items;
-                }
-                if ('objects' in data && data.objects) {
-                    data.objects = data.objects.map(formatObject);
-                   
-                }
-                if ('artists' in data && data.type == 'album') {
-                   data.artists = data.artists.map(formatObject);
-                }
-                data = formatObject(data, 0);
-                console.log(data);
-                data.updated_at = new Date().getTime();
-                self.cache[cachePath] = data;
-                fs.writeFileSync(cache_file, JSON.stringify(self.cache));
-                resolve(data);
-                
-            } catch (e) {
-                
-                fail(e);
             }
-        }
-    );
-};
-
-
-/**
- * Returns user by id
- **/
-SpotifyService.prototype.ttUser = function (id, resolve, fail) {
-    var self = this;
-    self._request('GET', '/users/' + id, {}, {}, resolve, fail);
-}
-
-/**
- * Returns user by id
- **/
-SpotifyService.prototype.getArtist = function (id, resolve, fail) {
-    var self = this;
-    self._request('GET', '/artists/' + id, {}, {}, resolve, fail);
+        );
+    });
 }
 
 
 /**
  * Returns user by id
  **/
-SpotifyService.prototype.getReleasesByArtist = function (id, release_type, offset, limit, resolve, fail) {
+SpotifyService.prototype.getUser = function (id) {
+    var self = this;
+    return new Promise(function (resolve, fail) {
+        self._request('GET', '/users/' + id).then(function (result) {
+           resolve(result); 
+        }, function (err) {
+            fail(err);
+        });
+    });
+}
+
+/**
+ * Returns user by id
+ **/
+SpotifyService.prototype.getArtist = function (id) {
+    var self = this;
+    return new Promise(function (resolve, fail) {
+        self._request('GET', '/artists/' + id).then(function (result) {
+           resolve(result); 
+        }, function (err) {
+            fail(err);
+        });
+    });
+}
+
+
+/**
+ * Returns user by id
+ **/
+SpotifyService.prototype.getReleasesByArtist = function (id, release_type, offset, limit) {
     var self = this;
     
     if (!release_type || release_type == "release") release_type = 'single,album';
-    self._request('GET', '/artists/' + id + '/albums', {
-        offset: offset,
-        limit: limit,
-        album_type: release_type
-    }, {}, 
-        function (result) {
-    
-        Promise.all(result.objects.map(function (album) {
-            return self.getTracksInAlbum(album.id);
-        })).then(function (tracklists) {
-            for (var i = 0; i < tracklists.length; i++) {
-                result.objects[i].tracks = tracklists[i];
+    return new Promise(function (resolve, fail) {
+        self._request('GET', '/artists/' + id + '/albums', {
+            offset: offset,
+            limit: limit,
+            album_type: release_type
+        }).then(function (result) {
         
-            }
+            Promise.all(result.objects.map(function (album) {
+                return self.getTracksInAlbum(album.id);
+            })).then(function (tracklists) {
+                for (var i = 0; i < tracklists.length; i++) {
+                    result.objects[i].tracks = tracklists[i];
+            
+                }
+                resolve(result); 
+            });
+        }, function (err) {
+            console.log(err);
+            fail(err);
+        });
+    });
+}
+
+
+/**
+ * Returns user by id
+ **/
+SpotifyService.prototype.getTracksInAlbum = function (id, offset, limit) {
+    var self = this;
+    return new Promise(function (resolve, fail) {
+        self._request('GET', '/albums/' + id + '/tracks', {offset: offset, limit: limit}).then(function (result) {
+           resolve(result); 
+        }, function (err) {
+            fail(err);
+        });
+    });
+}
+
+/**
+ * Returns user by id
+ **/
+SpotifyService.prototype.getPlaylist = function (username, identifier) {
+    var self = this;
+    return new Promise(function (resolve, fail) {
+        self._request('GET', '/users/' + username + '/playlists/' + identifier).then(function (result) {
+           self._request('GET', '/users/' + username + '/playlists/' + identifier + '/tracks').then(function (result2) {
+            result.tracks = result2;
             resolve(result); 
+           });
+        }, function (err) {
+            fail(err);
         });
-    }, function (err) {
-        console.log(err);
-        fail(err);
     });
-    
-}
-
-
-/**
- * Returns user by id
- **/
-SpotifyService.prototype.getTracksInAlbum = function (id, offset, limit, resolve, fail) {
-    var self = this;
-    self._request('GET', '/albums/' + id + '/tracks', {offset: offset, limit: limit}, {}, resolve, fail);
-    
 }
 
 /**
  * Returns user by id
  **/
-SpotifyService.prototype.getPlaylist = function (username, identifier, resolve, fail) {
+SpotifyService.prototype.getCountry = function (code) {
     var self = this;
-     self._request('GET', '/users/' + username + '/playlists/' + identifier, {}, {}, function (result) {
-       self._request('GET', '/users/' + username + '/playlists/' + identifier + '/tracks', {}, {}, function (result2) {
-        result.tracks = result2;
-        resolve(result); 
-       }, fail);
-    }, function (err) {
-        fail(err);
-    });
-
-}
-
-/**
- * Returns user by id
- **/
-SpotifyService.prototype.getCountry = function (code, resolve ,fail) {
-    var self = this;
-   if (code == 'qi') {
-        resolve({
-            id: code,
-            uri: 'spotify:country:' + code,
-            name: 'Qiland',
-            type: 'country',
-            service: service,
-            images: [{
-                url: 'https://media.licdn.com/mpr/mpr/shrink_200_200/AAEAAQAAAAAAAA2NAAAAJDliMzE1NTYzLThjOTMtNDRiZi1iNjc1LWQxYTlmNzVlM2M4NQ.png'
-            }]
-        });
-        return;
-    }
-    request({
-        url: 'https://restcountries.eu/rest/v2/alpha/' + code
-    }, function (err2, response2, body2) {
-        
-        try {
-            var result = JSON.parse(body2);
-           
+    return new Promise(function (resolve, fail) {
+        if (code == 'qi') {
             resolve({
                 id: code,
                 uri: 'spotify:country:' + code,
-                name: result.name,
+                name: 'Qiland',
                 type: 'country',
                 service: service,
                 images: [{
-                    url: result.flag
+                    url: 'https://media.licdn.com/mpr/mpr/shrink_200_200/AAEAAQAAAAAAAA2NAAAAJDliMzE1NTYzLThjOTMtNDRiZi1iNjc1LWQxYTlmNzVlM2M4NQ.png'
                 }]
             });
-        } catch (e) {
-            fail(500);
+            return;
         }
+        request({
+            url: 'https://restcountries.eu/rest/v2/alpha/' + code
+        }, function (err2, response2, body2) {
+            
+            try {
+                var result = JSON.parse(body2);
+               
+                resolve({
+                    id: code,
+                    uri: 'spotify:country:' + code,
+                    name: result.name,
+                    type: 'country',
+                    service: service,
+                    images: [{
+                        url: result.flag
+                    }]
+                });
+            } catch (e) {
+                fail(500);
+            }
+        });
     });
-
 }
 
-SpotifyService.prototype.getTopTracksInCountry = function (code, limit, offset, resolve, fail) {
+SpotifyService.prototype.getTopTracksInCountry = function (code, limit, offset) {
     var self = this;
-     if (code == 'qi') {
-        var result = { 
-            name: 'Qiland',
-            id: 'qi',
-            service: service
-        };
-        var url = '/users/spotify/playlists/37i9dQZF1Cz2XVi756juiX'; // '/users/drsounds/playlists/2KVJSjXlaz1PFl6sbOC5AU';
-        self._request('GET', url).then(function (result) {
+    return new Promise(function(resolve, fail) {
+         if (code == 'qi') {
+            var result = { 
+                name: 'Qiland',
+                id: 'qi',
+                service: service
+            };
+            var url = '/users/spotify/playlists/37i9dQZF1Cz2XVi756juiX'; // '/users/drsounds/playlists/2KVJSjXlaz1PFl6sbOC5AU';
+            self._request('GET', url).then(function (result) {
+                try {
+                    request({
+                        url: url + '/tracks',
+                        headers: headers
+                    }, function (err2, response2, body2) {
+                        var result3 = JSON.parse(body2);
+                        resolve({
+                            objects: result3.items.map(function (track, i) {
+                                var track = assign(track, track.track);
+                                track.user = track.added_by;
+                                track.time = track.added_at;
+                                track.position = i;
+                                track.service = service;
+                                if (track.user)
+                                track.user.name = track.user.id;
+                                track.user.service = service;
+                                return track;
+                            })
+                        });
+                    });
+                } catch (e) {
+                    fail(500);
+                }
+            }, function (err) {
+                fail(500);
+            });
+        }
+        self._request('GET','/browse/categories/toplists/playlists?country=' + code + '&limit=' + limit + '&offset=' + offset).then(function (result2) {
             try {
-                request({
-                    url: url + '/tracks',
-                    headers: headers
-                }, function (err2, response2, body2) {
-                    var result3 = JSON.parse(body2);
+                self._request('GET', result2.objects[0].href.substr('https://api.spotify.com/v1'.length) + '/tracks').then(function (result3) {
+                 
                     resolve({
                         objects: result3.items.map(function (track, i) {
                             var track = assign(track, track.track);
                             track.user = track.added_by;
-                            track.time = track.added_at;
+                            track.album.service = service;
                             track.position = i;
+                            track.artists = track.artists.map(function (a) {
+                                a.service = service;
+                                return a;
+                            })
                             track.service = service;
+                            track.time = track.added_at;
                             if (track.user)
                             track.user.name = track.user.id;
-                            track.user.service = service;
                             return track;
                         })
                     });
@@ -566,41 +620,13 @@ SpotifyService.prototype.getTopTracksInCountry = function (code, limit, offset, 
         }, function (err) {
             fail(500);
         });
-    }
-    self._request('GET','/browse/categories/toplists/playlists?country=' + code + '&limit=' + limit + '&offset=' + offset, {}, {}, function (result2) {
-        try {
-            self._request('GET', result2.objects[0].href.substr('https://api.spotify.com/v1'.length) + '/tracks', {}, {}, function (result3) {
-             
-                resolve({
-                    objects: result3.items.map(function (track, i) {
-                        var track = assign(track, track.track);
-                        track.user = track.added_by;
-                        track.album.service = service;
-                        track.position = i;
-                        track.artists = track.artists.map(function (a) {
-                            a.service = service;
-                            return a;
-                        })
-                        track.service = service;
-                        track.time = track.added_at;
-                        if (track.user)
-                        track.user.name = track.user.id;
-                        return track;
-                    })
-                });
-            });
-        } catch (e) {
-            fail(500);
-        }
-    }, function (err) {
-        fail(500);
-    });
-
+    })
 }
 
 
-SpotifyService.prototype.getTopListForCountry = function (code, limit, offset, resolve, fail) {
+SpotifyService.prototype.getTopListForCountry = function (code, limit, offset) {
     var self = this;
+    return new Promise(function(resolve, fail) {
          if (code == 'qi') {
             resolve({
                 id: code,
@@ -645,10 +671,12 @@ SpotifyService.prototype.getTopListForCountry = function (code, limit, offset, r
                 fail(500);
             }
         });
+    })
 }
 
-SpotifyService.prototype.getTopTracksInCountry = function (code, limit, offset, resolve, fail) {
+SpotifyService.prototype.getTopTracksInCountry = function (code, limit, offset) {
     var self = this;
+    return new Promise(function(resolve, fail) {
          if (code == 'qi') {
             var result = { 
                 name: 'Qiland',
@@ -656,7 +684,7 @@ SpotifyService.prototype.getTopTracksInCountry = function (code, limit, offset, 
                 service: service
             };
             var url = '/users/drsounds/playlists/2KVJSjXlaz1PFl6sbOC5AU/tracks';
-            self._request('GET', url, {}, {}, function (result3) {
+            self._request('GET', url).then(function (result3) {
         
                 resolve({
                     uri: 'spotify:country:' + code + ':top:' + limit + ':track',
@@ -677,7 +705,7 @@ SpotifyService.prototype.getTopTracksInCountry = function (code, limit, offset, 
             });
             return;
         }
-        self._request('GET','/browse/categories/toplists/playlists?country=' + code + '&limit=' + limit + '&offset=' + offset, {}, {}, function (result2) {
+        self._request('GET','/browse/categories/toplists/playlists?country=' + code + '&limit=' + limit + '&offset=' + offset).then(function (result2) {
             try {
                 var uri = result2.playlists.items[0].href.substr('https://api.spotify.com/v1'.length) + '/tracks';
                 self._request('GET', uri).then(function (result3) {
@@ -710,16 +738,17 @@ SpotifyService.prototype.getTopTracksInCountry = function (code, limit, offset, 
         }, function (err) {
             fail(500);
         });
+    })
 }
 
-SpotifyService.prototype.reorderTracksInPlaylist = function (username, identifier, range_start, range_length, insert_before, resolve, fail) {
+SpotifyService.prototype.reorderTracksInPlaylist = function (username, identifier, range_start, range_length, insert_before) {
     var self = this;
     return new Promise(function (resolve, fail) {
         self._request('PUT', '/users/' + username + '/playlists/' + identifier + '/tracks', {}, {
             range_start: range_start,
             range_length: range_length,
             insert_before: insert_before
-        },function (result) {
+        }).then(function (result) {
            resolve(result); 
         }, function (err) {
             fail(err);
@@ -728,13 +757,13 @@ SpotifyService.prototype.reorderTracksInPlaylist = function (username, identifie
 }
 
 
-SpotifyService.prototype.addTracksToPlaylist = function (username, identifier, uris, position, resolve, fail) {
+SpotifyService.prototype.addTracksToPlaylist = function (username, identifier, uris, position) {
     var self = this;
     return new Promise(function (resolve, fail) {
         self._request('POST', '/users/' + username + '/playlists/' + identifier + '/tracks', {
             position: position,
             uris: uris
-        }, {}, function (result) {
+        }).then(function (result) {
            resolve(result); 
         }, function (err) {
             fail(err);
@@ -743,12 +772,12 @@ SpotifyService.prototype.addTracksToPlaylist = function (username, identifier, u
 }
 
 
-SpotifyService.prototype.deleteTracksFromPlaylist = function (username, identifier, tracks, resolve, fail) {
+SpotifyService.prototype.deleteTracksFromPlaylist = function (username, identifier, tracks) {
     var self = this;
     return new Promise(function (resolve, fail) {
         self._request('DELETE', '/users/' + username + '/playlists/' + identifier + '/tracks', {
            tracks: tracks
-        }, {}, function (result) {
+        }).then(function (result) {
            resolve(result); 
         }, function (err) {
             fail(err);
@@ -760,15 +789,17 @@ SpotifyService.prototype.deleteTracksFromPlaylist = function (username, identifi
 /**
  * Returns user by id
  **/
-SpotifyService.prototype.getTracksInPlaylist = function (username, identifier, offset, limit, resolve, fail) {
+SpotifyService.prototype.getTracksInPlaylist = function (username, identifier, offset, limit) {
     var self = this;
-    self._request('GET', '/users/' + username + '/playlists/' + identifier + '/tracks', {
-        offset: offset,
-        limit: limit
-    }, {}, function (result) {
-       resolve(result); 
-    }, function (err) {
-        fail(err);
+    return new Promise(function (resolve, fail) {
+        self._request('GET', '/users/' + username + '/playlists/' + identifier + '/tracks', {
+            offset: offset,
+            limit: limit
+        }).then(function (result) {
+           resolve(result); 
+        }, function (err) {
+            fail(err);
+        });
     });
 }
 
@@ -776,17 +807,18 @@ SpotifyService.prototype.getTracksInPlaylist = function (username, identifier, o
 /**
  * Returns user by id
  **/
-SpotifyService.prototype.getTracksInAlbum = function (identifier, offset, limit, resolve, fail) {
+SpotifyService.prototype.getTracksInAlbum = function (identifier, offset, limit) {
     var self = this;
-    self._request('GET', '/albums/' + identifier + '/tracks', {
-        offset: offset,
-        limit: limit
-    }, {}, function (result) {
-       resolve(result); 
-    }, function (err) {
-        fail(err);
+    return new Promise(function (resolve, fail) {
+        self._request('GET', '/albums/' + identifier + '/tracks', {
+            offset: offset,
+            limit: limit
+        }).then(function (result) {
+           resolve(result); 
+        }, function (err) {
+            fail(err);
+        });
     });
-
 }
 
 
@@ -794,13 +826,13 @@ SpotifyService.prototype.getTracksInAlbum = function (identifier, offset, limit,
 /**
  * Returns user by id
  **/
-SpotifyService.prototype.getPlaylistsByUser = function (username, offset, limit, resolve, fail) {
+SpotifyService.prototype.getPlaylistsByUser = function (username, offset, limit) {
     var self = this;
     return new Promise(function (resolve, fail) {
         self._request('GET', '/users/' + username + '/playlists', {
             limit: limit,
             offset: offset
-        }, {}, function (result) {
+        }).then(function (result) {
            Promise.all(result.objects.map(function (playlist) {
                 return self.getTracksInPlaylist(playlist.owner.id, playlist.id);
             })).then(function (tracklists) {
@@ -822,12 +854,14 @@ SpotifyService.prototype.getPlaylistsByUser = function (username, offset, limit,
 /**
  * Returns user by id
  **/
-SpotifyService.prototype.getTrack = function (identifier, resolve, fail) {
+SpotifyService.prototype.getTrack = function (identifier) {
     var self = this;
-    self._request('GET', '/tracks/' + identifier, {}, {}, function (result) {
-       resolve(result); 
-    }, function (err) {
-        fail(err);
+    return new Promise(function (resolve, fail) {
+        self._request('GET', '/tracks/' + identifier).then(function (result) {
+           resolve(result); 
+        }, function (err) {
+            fail(err);
+        });
     });
 }
 
@@ -835,15 +869,17 @@ SpotifyService.prototype.getTrack = function (identifier, resolve, fail) {
 /**
  * Returns user by id
  **/
-SpotifyService.prototype.getMyPlaylists = function (offset, limit, resolve, fail) {
+SpotifyService.prototype.getMyPlaylists = function (offset, limit) {
     var self = this;
-    self._request('GET', '/me/playlists', {
-        offset: offset,
-        limit: limit
-    }, {}, function (result) {
-       resolve(result); 
-    }, function (err) {
-        fail(err);
+    return new Promise(function (resolve, fail) {
+        self._request('GET', '/me/playlists', {
+            offset: offset,
+            limit: limit
+        }).then(function (result) {
+           resolve(result); 
+        }, function (err) {
+            fail(err);
+        });
     });
 }
 
@@ -851,13 +887,13 @@ SpotifyService.prototype.getMyPlaylists = function (offset, limit, resolve, fail
 /**
  * Returns user by id
  **/
-SpotifyService.prototype.getMyArtists = function (offset, limit, resolve, fail) {
+SpotifyService.prototype.getMyArtists = function (offset, limit) {
     var self = this;
     return new Promise(function (resolve, fail) {
         self._request('GET', '/me/artists', {
             offset: offset,
             limit: limit
-        }, {}, function (result) {
+        }).then(function (result) {
            resolve(result); 
         }, function (err) {
             fail(err);
@@ -870,13 +906,13 @@ SpotifyService.prototype.getMyArtists = function (offset, limit, resolve, fail) 
 /**
  * Returns user by id
  **/
-SpotifyService.prototype.getRelatedArtistsForArtist = function (identifier, offset, limit, resolve, fail) {
+SpotifyService.prototype.getRelatedArtistsForArtist = function (identifier, offset, limit) {
     var self = this;
     return new Promise(function (resolve, fail) {
         self._request('GET', '/artists/' + identifier + '/related-artists', {
             offset: offset,
             limit: limit
-        }, {}, {}, function (result) {
+        }).then(function (result) {
            resolve(result); 
         }, function (err) {
             fail(err);
@@ -888,17 +924,18 @@ SpotifyService.prototype.getRelatedArtistsForArtist = function (identifier, offs
 /**
  * Returns user by id
  **/
-SpotifyService.prototype.getCategories = function (offset, limit, resolve, fail) {
+SpotifyService.prototype.getCategories = function (offset, limit) {
     var self = this;
-    self._request('GET', '/browse/categories', {
-        offset: offset,
-        limit: limit
-    }, {}, function (result) {
-       resolve(result); 
-    }, function (err) {
-        fail(err);
+    return new Promise(function (resolve, fail) {
+        self._request('GET', '/browse/categories', {
+            offset: offset,
+            limit: limit
+        }).then(function (result) {
+           resolve(result); 
+        }, function (err) {
+            fail(err);
+        });
     });
-
 }
 
 
@@ -907,13 +944,15 @@ SpotifyService.prototype.getCategories = function (offset, limit, resolve, fail)
  **/
 SpotifyService.prototype.getCategory = function (id, offset, limit) {
     var self = this;
-    self._request('GET', '/browse/categories/' + id, {
-        offset: offset,
-        limit: limit
-    }, {}, function (result) {
-       resolve(result); 
-    }, function (err) {
-        fail(err);
+    return new Promise(function (resolve, fail) {
+        self._request('GET', '/browse/categories/' + id, {
+            offset: offset,
+            limit: limit
+        }).then(function (result) {
+           resolve(result); 
+        }, function (err) {
+            fail(err);
+        });
     });
 }
 
@@ -921,13 +960,13 @@ SpotifyService.prototype.getCategory = function (id, offset, limit) {
 /**
  * Returns user by id
  **/
-SpotifyService.prototype.getPlaylistsInCategory = function (id, offset, limit, resolve, fail) {
+SpotifyService.prototype.getPlaylistsInCategory = function (id, offset, limit) {
     var self = this;
     return new Promise(function (resolve, fail) {
         self._request('GET', '/browse/categories/' + id + '/playlists', {
             offset: offset,
             limit: limit
-        }, {}, function (result) {
+        }).then(function (result) {
            resolve({
                objects: result.playlists.items
            }); 
@@ -941,15 +980,17 @@ SpotifyService.prototype.getPlaylistsInCategory = function (id, offset, limit, r
 /**
  * Returns user by id
  **/
-SpotifyService.prototype.getFeaturedPlaylists = function (offset, limit, resolve, fail) {
+SpotifyService.prototype.getFeaturedPlaylists = function (offset, limit) {
     var self = this;
-    self._request('GET', '/browse/featured-playlists', {
-        offset: offset,
-        limit: limit
-    }, {}, function (result) {
-       resolve(result); 
-    }, function (err) {
-        fail(err);
+    return new Promise(function (resolve, fail) {
+        self._request('GET', '/browse/featured-playlists', {
+            offset: offset,
+            limit: limit
+        }).then(function (result) {
+           resolve(result); 
+        }, function (err) {
+            fail(err);
+        });
     });
 }
 
@@ -957,13 +998,13 @@ SpotifyService.prototype.getFeaturedPlaylists = function (offset, limit, resolve
 /**
  * Returns user by id
  **/
-SpotifyService.prototype.getNewReleases = function (offset, limit, resolve, fail) {
+SpotifyService.prototype.getNewReleases = function (offset, limit) {
     var self = this;
     return new Promise(function (resolve, fail) {
         self._request('GET', '/browse/new-releases', {
             offset: offset,
             limit: limit
-        }, {}, function (result) {
+        }).then(function (result) {
            resolve(result); 
         }, function (err) {
             fail(err);
@@ -975,13 +1016,13 @@ SpotifyService.prototype.getNewReleases = function (offset, limit, resolve, fail
 /**
  * Returns user by id
  **/
-SpotifyService.prototype.getMyReleases = function (id, offset, limit, resolve, fail) {
+SpotifyService.prototype.getMyReleases = function (id, offset, limit) {
     var self = this;
     return new Promise(function (resolve, fail) {
         self._request('GET', '/me/albums', {
             offset: offset,
             limit: limit
-        }, {}, function (result) {
+        }).then(function (result) {
            resolve(result); 
         }, function (err) {
             fail(err);
@@ -993,13 +1034,13 @@ SpotifyService.prototype.getMyReleases = function (id, offset, limit, resolve, f
 /**
  * Returns user by id
  **/
-SpotifyService.prototype.getMyTracks = function (offset, limit, resolve, fail) {
+SpotifyService.prototype.getMyTracks = function (offset, limit) {
     var self = this;
     return new Promise(function (resolve, fail) {
         self._request('GET', '/me/tracks', {
             offset: offset,
             limit: limit
-        }, {}, function (result) {
+        }).then(function (result) {
            resolve(result); 
         }, function (err) {
             fail(err);
@@ -1012,10 +1053,10 @@ SpotifyService.prototype.getMyTracks = function (offset, limit, resolve, fail) {
 /**
  * Returns user by id
  **/
-SpotifyService.prototype.playTrack = function (body, resolve, fail) {
+SpotifyService.prototype.playTrack = function (body) {
     var self = this;
     return new Promise(function (resolve, fail) {
-        self._request('PUT', '/me/player/play', {}, body, function (result) {
+        self._request('PUT', '/me/player/play', {}, body).then(function (result) {
            resolve(result); 
         }, function (err) {
             fail(err);
@@ -1868,32 +1909,33 @@ SpotifyService.prototype.getImageForTrack = function (id, callback) {
 SpotifyService.prototype.seek = function (position) {
 }
 
-SpotifyService.prototype.login = function (resolve, fail) {
+SpotifyService.prototype.login = function () {
     console.log("Log in");
     var self = this;
-    alert("AFFF");
-    var win = gui.Window.get(window.open('https://accounts.spotify.com/authorize/?client_id=' + this.apikeys.client_id + '&response_type=code&redirect_uri=' + encodeURI(this.apiKeys.redirect_uri) + '&scope=user-read-private%20user-read-email&state=34fFs29kd09', {
-        "position": "center",
-        "focus": true,
-        "toolbar": false,
-        "frame": true
-    }));
-    console.log(win);
-    alert(win);
-    var i = setInterval(function () {
-        if (!win) {
-            clearInterval(i);
-            var code = localStorage.getItem("code", null);
-            if (code) {
-                self.requestAccessToken(code, function () {
-                    resolve();
-                }, function () {
-                    fail();
-                })
+    var promise = new Promise(function (resolve, fail) {
+        alert("AFFF");
+        var win = gui.Window.get(window.open('https://accounts.spotify.com/authorize/?client_id=' + this.apikeys.client_id + '&response_type=code&redirect_uri=' + encodeURI(this.apiKeys.redirect_uri) + '&scope=user-read-private%20user-read-email&state=34fFs29kd09', {
+            "position": "center",
+            "focus": true,
+            "toolbar": false,
+            "frame": true
+        }));
+        console.log(win);
+        alert(win);
+        var i = setInterval(function () {
+            if (!win) {
+                clearInterval(i);
+                var code = localStorage.getItem("code", null);
+                if (code) {
+                    self.requestAccessToken(code, function () {
+                        resolve();
+                    }, function () {
+                        fail();
+                    })
+                }
             }
-        }
-    }, 99);
-
+        }, 99);
+    });
     return promise;
 }
 
@@ -1985,21 +2027,23 @@ SpotifyService.prototype.getPlaylistsInFolder = function (id) {
 
 
 
-SpotifyService.prototype.search = function (query, offset, limit, type, resolve, fail) {
+SpotifyService.prototype.search = function (query, offset, limit, type) {
     var self = this;
-    self._request('GET', '/search', {
-        q: query,
-        limit: limit,
-        offset: offset,
-        type: type
-    }, {}, function (data) {
-        resolve(data);
-    }, function (err) {
-        fail(err);
+    var promise = new Promise(function (resolve, fail) {
+        self._request('GET', '/search', {
+            q: query,
+            limit: limit,
+            offset: offset,
+            type: type
+        }).then(function (data) {
+            resolve(data);
+        }, function (err) {
+            fail(err);
+        });
     });
     return promise;
 };
-SpotifyService.prototype.loadPlaylist = function (user, id, callback, resolve, fail) {
+SpotifyService.prototype.loadPlaylist = function (user, id, callback) {
     var self = this;
     var promise = new Promise(function (resolve, fail) {
         self.request("GET", "/users/" + user + "/playlists/" + id + "/tracks").then(function (tracklist) {
@@ -2087,10 +2131,10 @@ SpotifyService.prototype.resolveTracks = function (uris, callback) {
 
 }
 
-SpotifyService.prototype.getPlaylistTracks = function (user, playlist_id, page, resolve, fail) {
+SpotifyService.prototype.getPlaylistTracks = function (user, playlist_id, page, callback) {
     var self = this;
     var promise = new Promise(function (resolve, fail) {
-         self._request('GET', '/users/' + user + '/playlists/' + playlist_id, {}, {}, function (data) {
+         self._request('GET', '/users/' + user + '/playlists/' + playlist_id).then(function (data) {
              resolve({
                  'objects': data.tracks.items
              });
@@ -2140,7 +2184,7 @@ app.get('/login', function (req, res) {
 app.get('/authenticate', function (req, res) {
     console.log("Got authenticate request");
     console.log(req);
-    music.authenticate(req, function (success) {
+    music.authenticate(req).then(function (success) {
         console.log("success");
         res.statusCode = 200;
         res.json(success);
@@ -2159,7 +2203,7 @@ app.get('/user/:username/playlist', function (req, res) {
     if (req.body) {
         body = (req.body);
     }
-    music.getPlaylistsByUser(req.params.username, req.query.offset, req.query.limit, function (result) {
+    music.getPlaylistsByUser(req.params.username, req.query.offset, req.query.limit).then(function (result) {
     
         res.json(result);
     }, function (err) {
@@ -2176,7 +2220,7 @@ app.get('/label/:username/playlist', function (req, res) {
     if (req.body) {
         body = (req.body);
     }
-    music.getPlaylistsByUser(req.params.username, req.query.offset, req.query.limit, function (result) {
+    music.getPlaylistsByUser(req.params.username, req.query.offset, req.query.limit).then(function (result) {
     
         res.json(result);
     }, function (err) {
@@ -2209,7 +2253,7 @@ app.get('/curator/:username/playlist', function (req, res) {
     if (req.body) {
         body = (req.body);
     }
-    music.getPlaylistsByUser(req.params.username, req.query.offset, req.query.limit, function (result) {
+    music.getPlaylistsByUser(req.params.username, req.query.offset, req.query.limit).then(function (result) {
     
         res.json(result);
     }, function (err) {
@@ -2226,7 +2270,7 @@ app.get('/curator/:username', function (req, res) {
     if (req.body) {
         body = (req.body);
     }
-    music.getUser(req.params.username, function (result) {
+    music.getUser(req.params.username).then(function (result) {
     
         res.json(result);
     }, function (err) {
@@ -2242,7 +2286,7 @@ app.get('/me/playlist', function (req, res) {
     if (req.body) {
         body = (req.body);
     }
-    music.getMyPlaylists(req.query.offset, req.query.limit, function (result) {
+    music.getMyPlaylists(req.query.offset, req.query.limit).then(function (result) {
     
         res.json(result);
     }, function (err) {
@@ -2258,7 +2302,7 @@ app.get('/me/folder', function (req, res) {
     if (req.body) {
         body = (req.body);
     }
-    music.getFolders(req.query.offset, req.query.limit, function (result) {
+    music.getFolders(req.query.offset, req.query.limit).then(function (result) {
     
         res.json(result);
     }, function (err) {
@@ -2274,7 +2318,7 @@ app.get('/me/release', function (req, res) {
     if (req.body) {
         body = (req.body);
     }   
-    music.getMyReleases(req.query.offset, req.query.limit, function (result) {
+    music.getMyReleases(req.query.offset, req.query.limit).then(function (result) {
     
         res.json(result);
     }, function (err) {
@@ -2311,8 +2355,8 @@ app.put('/me/player/play', function (req, res) {
     if (req.body) {
         body = (req.body);
     }
-    music.playTrack(body, function (result) {
-        music.getCurrentTrack(function (result) {
+    music.playTrack(body).then(function (result) {
+        music.getCurrentTrack().then(function (result) {
             res.json(result);
             
         });
@@ -2330,7 +2374,7 @@ app.get('/me/player/currently-playing', function (req, res) {
     if (req.body) {
         body = (req.body);
     }
-    music.getCurrentTrack(body, function (result) {
+    music.getCurrentTrack(body).then(function (result) {
     
         res.json(result);
     }, function (err) {
@@ -2348,7 +2392,7 @@ app.get('/internal/library/track', function (req, res) {
     if (req.body) {
         body = (req.body);
     }
-    music.getMyTracks(req.query.offset, req.query.limit, function (result) {
+    music.getMyTracks(req.query.offset, req.query.limit).then(function (result) {
     
         res.json(result);
     }, function (err) {
@@ -2364,7 +2408,7 @@ app.get('/category', function (req, res) {
     if (req.body) {
         body = (req.body);
     }
-    music.getCategories(req.query.offset, req.query.limit, function (result) {
+    music.getCategories(req.query.offset, req.query.limit).then(function (result) {
     
         res.json(result);
     }, function (err) {
@@ -2381,7 +2425,7 @@ app.get('/category/:identifier', function (req, res) {
     if (req.body) {
         body = (req.body);
     }
-    music.getCategory(req.params.identifier, req.query.offset, req.query.limit, function (result) {
+    music.getCategory(req.params.identifier, req.query.offset, req.query.limit).then(function (result) {
     
         res.json(result);
     }, function (err) {
@@ -2411,7 +2455,7 @@ app.get('/label/:identifier', function (req, res) {
 app.get('/label/:identifier/release', function (req, res) {
        music.req = req;
     var name = decodeURIComponent(req.params.identifier);
-    music.search('label:"' + req.params.identifier + '"', req.params.limit, req.params.offset, 'album', function (result) {
+    music.search('label:"' + req.params.identifier + '"', req.params.limit, req.params.offset, 'album').then(function (result) {
         res.json(result);
     }, function (err) {
         res.status(err).send({error: err});
@@ -2427,7 +2471,7 @@ app.get('/category/:identifier/playlist', function (req, res) {
     if (req.body) {
         body = (req.body);
     }
-    music.getPlaylistsInCategory(req.params.identifier, req.query.offset, req.query.limit, function (result) {
+    music.getPlaylistsInCategory(req.params.identifier, req.query.offset, req.query.limit).then(function (result) {
     
         res.json(result);
     }, function (err) {
@@ -2444,7 +2488,7 @@ app.get('/search', function (req, res) {
     if (req.body) {
         body = (req.body);
     }
-    music.search(req.query.q, req.query.limit, req.query.offset, req.query.type, function (result) {
+    music.search(req.query.q, req.query.limit, req.query.offset, req.query.type).then(function (result) {
     
         res.json(result);
     }, function (err) {
@@ -2461,7 +2505,7 @@ app.get('/search/:query/track', function (req, res) {
     if (req.body) {
         body = (req.body);
     }
-    music.search(req.query.q, req.query.limit, req.query.offset, 'track', function (result) {
+    music.search(req.query.q, req.query.limit, req.query.offset, 'track').then(function (result) {
     
         res.json(result);
     }, function (err) {
@@ -2478,7 +2522,7 @@ app.get('/search/:query/artist', function (req, res) {
     if (req.body) {
         body = (req.body);
     }
-    music.search(req.query.q, req.query.limit, req.query.offset, 'artist', function (result) {
+    music.search(req.query.q, req.query.limit, req.query.offset, 'artist').then(function (result) {
     
         res.json(result);
     }, function (reject) {
@@ -2495,7 +2539,7 @@ app.get('/search/:query/release', function (req, res) {
     if (req.body) {
         body = (req.body);
     }
-    music.search(req.query.q, req.query.limit, req.query.offset, 'album', function (result) {
+    music.search(req.query.q, req.query.limit, req.query.offset, 'album').then(function (result) {
     
         res.json(result);
     }, function (err) {
@@ -2512,7 +2556,7 @@ app.get('/search/:query/album', function (req, res) {
     if (req.body) {
         body = (req.body);
     }
-    music.search(req.query.q, req.query.limit, req.query.offset, 'album', function (result) {
+    music.search(req.query.q, req.query.limit, req.query.offset, 'album').then(function (result) {
     
         res.json(result);
     }, function (err) {
@@ -2529,7 +2573,7 @@ app.get('/search/:query/playlist', function (req, res) {
     if (req.body) {
         body = (req.body);
     }
-    music.search(req.query.q, req.query.limit, req.query.offset, 'playlist',function (result) {
+    music.search(req.query.q, req.query.limit, req.query.offset, 'playlist').then(function (result) {
     
         res.json(result);
     }, function (err) {
@@ -2546,7 +2590,7 @@ app.get('/user/:username/playlist/:identifier', function (req, res) {
     if (req.body) {
         body = (req.body);
     }
-    music.getPlaylist(req.params.username, req.params.identifier, function (result) {
+    music.getPlaylist(req.params.username, req.params.identifier).then(function (result) {
         
         res.json(result);
     }, function (err) {
@@ -2563,7 +2607,7 @@ app.get('/user/:username/playlist/:identifier/track', function (req, res) {
     if (req.body) {
         body = (req.body);
     }
-    music.getTracksInPlaylist(req.params.username, req.params.identifier, req.query.offset, req.query.limit, function (result) {
+    music.getTracksInPlaylist(req.params.username, req.params.identifier, req.query.offset, req.query.limit).then(function (result) {
         res.json(result);
     }, function (err) {
         res.status(err).send({error: err});
@@ -2579,7 +2623,7 @@ app.post('/user/:username/playlist/:identifier/track', function (req, res) {
     if (req.body) {
         body = (req.body);
     }
-    music.addTracksInPlaylist(req.params.username, req.params.identifier, body.tracks, body.position, function (result) {
+    music.addTracksInPlaylist(req.params.username, req.params.identifier, body.tracks, body.position).then(function (result) {
         res.json(result);
     }, function (err) {
         res.status(err).send({error: err});
@@ -2595,7 +2639,7 @@ app.put('/user/:username/playlist/:identifier/track', function (req, res) {
     if (req.body) {
         body = (req.body);
     }
-    music.reorderTracksInPlaylist(req.params.username, req.params.identifier, body.range_start, body.range_length + 1, parseInt(body.insert_before), function (result) {
+    music.reorderTracksInPlaylist(req.params.username, req.params.identifier, body.range_start, body.range_length + 1, parseInt(body.insert_before)).then(function (result) {
         res.json(result);
     }, function (err) {
         res.status(err).send({error: err});
@@ -2611,7 +2655,7 @@ app.get('/artist/:identifier', function (req, res) {
     if (req.body) {
         body = (req.body);
     }
-    music.getArtist(req.params.identifier, function (result) {
+    music.getArtist(req.params.identifier).then(function (result) {
         res.json(result);
     }, function (err) {
         res.status(err).send({error: err});
@@ -2619,8 +2663,8 @@ app.get('/artist/:identifier', function (req, res) {
 });
 
 app.get('/artist/:identifier/info', function (req, res) {
-    music.getArtist(req.params.identifier, function (result) {
-        musicInfo.getArtistInfo(result.name, function (artistInfo) {
+    music.getArtist(req.params.identifier).then(function (result) {
+        musicInfo.getArtistInfo(result.name).then(function (artistInfo) {
            res.json(artistInfo);
         }, function (err) {
             res.status(err).send({error: err});
@@ -2641,7 +2685,7 @@ app.get('/artist/:identifier/about', function (req, res) {
         body = (req.body);
     }
     
-    music.getArtist(req.params.identifier, function (result) {
+    music.getArtist(req.params.identifier).then(function (result) {
         var data = {
             monthlyListners: 0,
             weeklyListeners: 0,
@@ -2652,7 +2696,45 @@ app.get('/artist/:identifier/about', function (req, res) {
             rank: 1000000,
             biography: null
         };
-        resolve(data);
+        wiki.describe(result.name).then(function (description) {
+            if (description == null) {
+                wiki.describe(result.name + ' (Music artist)').then(function (description) {
+                    if (result.description != null) {   
+                        data.biography = {
+                            service: {
+                                id: 'wikipedia',
+                                name: 'Wikipedia',
+                                uri: 'bungalow:service:wikipedia',
+                                type: 'service',
+                                images: [{
+                                    url: ''
+                                }]
+                            },
+                            body: description
+                        };
+                    }
+                    res.json(data);
+                }, function (err) {
+                    res.status(reject).send({error: reject});
+                });
+                return;
+            }
+            data.biography = {
+                service: {
+                    id: 'wikipedia',
+                    name: 'Wikipedia',
+                    uri: 'bungalow:service:wikipedia',
+                    type: 'service',
+                    images: [{
+                        url: ''
+                    }]
+                },
+                body: description
+            };
+            res.json(data);
+        }, function (err) {
+            res.status(reject).send({error: reject});
+        });
     }, function (reject) {
         res.status(reject).send({error: reject});
     });
@@ -2666,8 +2748,8 @@ app.get('/artist/:identifier/top/:count', function (req, res) {
     if (req.body) {
         body = (req.body);
     }
-    music.getArtist(req.params.identifier, function (result) {
-        music.getTopTracksForArtist(result.id, 'se', function (toplist) {
+    music.getArtist(req.params.identifier).then(function (result) {
+        music.getTopTracksForArtist(result.id, 'se').then(function (toplist) {
             toplist.objects = toplist.  objects.slice(0, req.params.count);
             res.json({
                 name: 'Top Tracks',
@@ -2701,7 +2783,7 @@ app.get('/artist/:identifier/top/:count/track', function (req, res) {
     if (req.body) {
         body = (req.body);
     }
-    music.getTopTracksForArtist(req.params.identifier, 'se', req.params.offset, req.params.limit, function (result) {
+    music.getTopTracksForArtist(req.params.identifier, 'se', req.params.offset, req.params.limit).then(function (result) {
        result.objects = result.objects.slice(0, req.params.count);
        res.json(result);
         res.end();
@@ -2720,7 +2802,7 @@ app.get('/artist/:identifier/release', function (req, res) {
         body = (req.body);
     }
     
-        music.getReleasesByArtist(req.params.identifier, 'release', req.query.offset, req.query.limit, function (result) {
+        music.getReleasesByArtist(req.params.identifier, 'release', req.query.offset, req.query.limit).then(function (result) {
         res.json(result);
         res.end();
     }, function (reject) {
@@ -2739,12 +2821,12 @@ app.get('/artist/:identifier/album', function (req, res) {
         body = (req.body);
     }
     
-    music.getReleasesByArtist(req.params.identifier, 'album', req.query.offset, req.query.limit, function (result) {
+    music.getReleasesByArtist(req.params.identifier, 'album', req.query.offset, req.query.limit).then(function (result) {
         res.json(result);
         res.end();
     }, function (reject) {
         res.status(reject);
-        res.json(reject);
+        res.end();
     });
 });
 
@@ -2759,7 +2841,7 @@ app.get('/artist/:identifier/single', function (req, res) {
         body = (req.body);
     }
         
-    music.getReleasesByArtist(req.params.identifier, 'single', req.query.offset, req.query.limit, function (result) {
+    music.getReleasesByArtist(req.params.identifier, 'single', req.query.offset, req.query.limit).then(function (result) {
         res.json(result);
         res.end();
     }, function (reject) {
@@ -2778,7 +2860,7 @@ app.get('/artist/:identifier/appears_on', function (req, res) {
         body = (req.body);
     }
     console.log(req.query);
-    music.getReleasesByArtist(req.params.identifier, 'appears_on', req.query.offset, req.query.limit, function (result) {
+    music.getReleasesByArtist(req.params.identifier, 'appears_on', req.query.offset, req.query.limit).then(function (result) {
         res.json(result);
         res.end();
     }, function (reject) {
@@ -2797,7 +2879,7 @@ app.get('/artist/:identifier/compilation', function (req, res) {
         body = (req.body);
     }
     
-    music.getReleasesByArtist(req.params.identifier, 'compilation', req.query.offset, req.query.limit, function (result) {
+    music.getReleasesByArtist(req.params.identifier, 'compilation', req.query.offset, req.query.limit).then(function (result) {
         res.json(result);
         res.end();
     }, function (reject) {
@@ -2815,7 +2897,7 @@ app.get('/album/:identifier', function (req, res) {
         body = (req.body);
     }
     
-    music.getAlbum(req.params.identifier, function (result) {
+    music.getAlbum(req.params.identifier).then(function (result) {
         res.json(result);
         res.end();
     }, function (reject) {
@@ -2833,7 +2915,7 @@ app.get('/album/:identifier/track', function (req, res) {
         body = (req.body);
     }
     
-    music.getTracksInAlbum(req.params.identifier, req.query.offset, req.query.limit, function (result) {
+    music.getTracksInAlbum(req.params.identifier, req.query.offset, req.query.limit).then(function (result) {
         res.json(result);
         res.end();
     }, function (reject) {
@@ -2852,7 +2934,7 @@ app.get('/country/:identifier', function (req, res) {
         body = (req.body);
     }
     
-    music.getCountry(req.params.identifier, function (result) {
+    music.getCountry(req.params.identifier).then(function (result) {
         res.json(result);
         res.end();
     }, function (reject) {
@@ -2871,7 +2953,7 @@ app.get('/country/:identifier/top/:limit', function (req, res) {
         body = (req.body);
     }
     
-    music.getTopListForCountry(req.params.identifier, req.params.limit, function (result) {
+    music.getTopListForCountry(req.params.identifier, req.params.limit).then(function (result) {
         res.json(result);
         res.end();
     }, function (reject) {
@@ -2890,7 +2972,7 @@ app.get('/country/:identifier/top/:limit/track', function (req, res) {
         body = (req.body);
     }
     
-    music.getTopTracksInCountry(req.params.identifier, req.params.limit, function (result) {
+    music.getTopTracksInCountry(req.params.identifier, req.params.limit).then(function (result) {
         res.json(result);
         res.end();
     }, function (reject) {
@@ -2907,7 +2989,7 @@ app.get('/featured/playlist', function (req, res) {
     if (req.body) {
         body = (req.body);
     }   
-    music.getFeaturedPlaylists(req.query.offset, req.query.limit, function (result) {
+    music.getFeaturedPlaylists(req.query.offset, req.query.limit).then(function (result) {
     
         res.json(result);
         res.end();
@@ -2919,7 +3001,7 @@ app.get('/featured/playlist', function (req, res) {
 
 app.get('/track/:identifier', function (req, res) {
     music.req = req;
-    music.getTrack(req.params.identifier, function (result) {
+    music.getTrack(req.params.identifier).then(function (result) {
         res.json(result);
         res.end();
     }, function (reject) {
@@ -2930,7 +3012,7 @@ app.get('/track/:identifier', function (req, res) {
 
 app.get('/genre/:identifier/playlist', function (req, res) {
     music.req = req;
-    music.getPlaylistsInCategory(req.params.identifier, function (result) {
+    music.getPlaylistsInCategory(req.params.identifier).then(function (result) {
         res.json(result);
         res.end();
     }, function (reject) {
@@ -2941,7 +3023,7 @@ app.get('/genre/:identifier/playlist', function (req, res) {
 
 app.get('/genre/:identifier', function (req, res) {
     music.req = req;
-    music.getCategory(req.params.identifier, function (result) {
+    music.getCategory(req.params.identifier).then(function (result) {
         res.json(result);
         res.end();
     }, function (reject) {
