@@ -371,6 +371,16 @@ SpotifyService.prototype._request = function (method, path, payload, postData) {
                         data.objects = data.items;
                         delete data.items;
                     }
+                    if ('categories' in data) {
+                        data.objects = data.categories.items.map((o) => {
+                            o.uri = 'spotify:category:' + o.id;
+                            o.type = 'category';
+                            o.images = o.icons;
+                            delete o.icons;
+                            return o;
+                        });
+                        delete data.categories;
+                    }
                     if ('tracks' in data) {
                         if (data.tracks instanceof Array) {
                             data.objects = data.tracks;
@@ -3010,7 +3020,7 @@ app.get('/track/:identifier', function (req, res) {
     });
 })
 
-app.get('/genre/:identifier/playlist', function (req, res) {
+app.get('/category/:identifier/playlist', function (req, res) {
     music.req = req;
     music.getPlaylistsInCategory(req.params.identifier).then(function (result) {
         res.json(result);
@@ -3021,9 +3031,20 @@ app.get('/genre/:identifier/playlist', function (req, res) {
     });
 })
 
-app.get('/genre/:identifier', function (req, res) {
+app.get('/category/:identifier', function (req, res) {
     music.req = req;
     music.getCategory(req.params.identifier).then(function (result) {
+        res.json(result);
+        res.end();
+    }, function (reject) {
+        res.status(reject).send({error: reject});
+        res.end();
+    });
+})
+
+app.get('/category', function (req, res) {
+    music.req = req;
+    music.getCategories(req.params.identifier).then(function (result) {
         res.json(result);
         res.end();
     }, function (reject) {
