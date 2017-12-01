@@ -2044,29 +2044,65 @@ SpotifyService.prototype.request = function (method, url, payload, postData, req
 
 SpotifyService.prototype.getPlaylistsFeaturingArtist = function (name, offset, limit) {
     return new Promise(function (resolve, reject) {
-       searchEngine.search('"' + name + '"', 'open.spotify.com/user', 'items(title,link)', '015106568197926965801%3Aif4ytykb8ws', offset + 1, limit).then(function (result) {
-            var data = {};
-            data.objects = result.items.map((o) => {
-                var uri = 'spotify:' + o.link.split('/').slice(3).join(':');
-                return {
-                    id: uri.split(':')[4],
-                    uri: uri,
-                    name: o.title,
-                    type: 'playlist',
-                    user: {
-                        name: uri.split(':')[2],
-                        id: uri.split(':')[2],
-                        name: uri.split(':')[2],
-                        type: 'user'
-                    }
+        var promises = [1,2,3,4,5, 6, 7, 8, 9].map(function (i) {
+            return new Promise(
+                function (resolve2, reject2) {
+                    offset = parseInt(offset);
+                    searchEngine.search('"' + name + '"', 'open.spotify.com/user', 'items(title,link)', '015106568197926965801%3Aif4ytykb8ws', ((offset) / 10) + 1 + i, limit).then(function (result) {
+                        var data = {};
+                        try {
+                            data.objects = result.items.map((o) => {
+                                var uri = 'spotify:' + o.link.split('/').slice(3).join(':');
+                                return {
+                                    id: uri.split(':')[4],
+                                    uri: uri,
+                                    name: o.title,
+                                    type: 'playlist',
+                                    user: {
+                                        name: uri.split(':')[2],
+                                        id: uri.split(':')[2],
+                                        name: uri.split(':')[2],
+                                        type: 'user'
+                                    }
+                                }
+                            });
+                            data.service = result.service;
+                            resolve2(data);
+                        } catch (e) {
+                            console.log(result);
+                            reject2(e);
+                        }
+                    }, function (err) {
+                        reject2(err);
+                    });
                 }
-            });
-            data.service = result.service;
-            resolve(data);
-       }, function (err) {
-            reject(err);
+            );
         });
-    });
+        Promise.all(promises).catch(function (err) {
+            reject(err);
+        
+        }).then(
+            function (results) {
+                var data = {
+                    objects: [],
+                    service: {
+                        id: 'google',
+                        name: 'Google',
+                        type: 'service'
+                    }
+                };
+                results.map(function (r) {
+                    r.objects.map(function (o) {
+                        data.objects.push(o);
+                    })
+                });
+                resolve(data);
+            }
+        ).catch(function (errors) {
+            console.log(errors);
+            reject(errors);
+        });;
+    })
 }
 
 
