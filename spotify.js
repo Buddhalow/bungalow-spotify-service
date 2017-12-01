@@ -154,7 +154,7 @@ SpotifyService.prototype.authenticate = function (req, resolve) {
     }, function (error, response, body) {
         console.log(error);
         var result = JSON.parse(body);
-        result.issued = '' + new Date().getTime();
+        result.issued = new Date().getTime();
         if (error || !result.access_token) {
             resolve(error);
             return;
@@ -233,6 +233,8 @@ SpotifyService.prototype.refreshAccessToken = function () {
             }
             console.log(self.apikeys);
             self.session = result;
+            self.session.issued = new Date().getTime();
+            self.session.refresh_token = refresh_token;
             music.res.clearCookie('spotify');
             
             music.res.cookie('spotify', JSON.stringify(result));
@@ -522,7 +524,7 @@ SpotifyService.prototype._request = function (method, path, payload, postData) {
             );
         }
         
-        if (new Date().getTime() - parseInt(self.session.issued) < self.session.expires_in) {
+        if (new Date().getTime() - self.session.issued < self.session.expires_in * 1000) {
             
              _do(resolve, fail);
         }  else {
