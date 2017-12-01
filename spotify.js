@@ -2855,7 +2855,7 @@ app.get('/artist/:identifier/playlist', function (req, res) {
     
     if (req.params.identifier.length == 22) {
         music.getArtist(req.params.identifier).then(function (artist) {
-            music.getPlaylistsFeaturingArtist(artist.name).then(function (result) {
+            music.getPlaylistsFeaturingArtist(artist.name, 0).then(function (result) {
                 res.json(result).send(); 
             }, function (err) {
                 res.status(500).json(err).send();
@@ -2864,7 +2864,7 @@ app.get('/artist/:identifier/playlist', function (req, res) {
             res.status(500).json(err).send();
         });
     } else {
-       music.getPlaylistsFeaturingArtist(req.params.identifier).then(function (result) {
+       music.getPlaylistsFeaturingArtist(req.params.identifier, 0).then(function (result) {
             res.json(result).send(); 
         }, function (err) {
             res.status(500).json(err).send();
