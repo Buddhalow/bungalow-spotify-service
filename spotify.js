@@ -579,16 +579,18 @@ SpotifyService.prototype.getArtist = function (id) {
 }
 
 
-SpotifyService.getReleasesByArtistName = function (id, release_type, offset, limit) {
+SpotifyService.prototype.getReleasesByArtistName = function (id, release_type, offset, limit) {
     var self = this;
     if (!release_type || release_type == "release") release_type = 'single,album';
     return new Promise(function (resolve, fail) {
         self.getArtistByName(id).then(function (artist) {
-            self.getReleasesByArtistName(artist.id, release_type, offset, limit).then(function (result) {
+            self.getReleasesByArtist(artist.id, release_type, offset, limit).then(function (result) {
                 resolve(result);
             }, function (err) {
                 fail(err);
             })
+        }, function (err) {
+            fail(err);
         });
     });
     
@@ -655,7 +657,7 @@ SpotifyService.prototype.getReleasesByArtist = function (id, release_type, offse
 /**
  * Returns user by id
  **/
-SpotifyService.prototype.getReleasesByArtistName = function (id, release_type, offset, limit) {
+SpotifyService.prototype.getReleases = function (id, release_type, offset, limit) {
     var self = this;
     
     if (!release_type || release_type == "release") release_type = 'single,album';
@@ -2061,6 +2063,7 @@ SpotifyService.prototype.getPlaylistsFeaturingArtist = function (name, offset, l
                                     user: {
                                         name: uri.split(':')[2],
                                         id: uri.split(':')[2],
+                                        uri: 'spotify:user:' + uri.split(':')[2],
                                         name: uri.split(':')[2],
                                         type: 'user'
                                     }
