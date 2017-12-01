@@ -4,9 +4,11 @@ var request = require('request');
 var express = require('express');
 var assign = require('object-assign');
 var Promise = require("es6-promise").Promise;
+var cookieParser = require('cookie-parser');
 var queryString = require('query-string');
 var api_key_file = os.homedir() + '/.bungalow/spotify.key.json';
 var cache_file = os.homedir() + '/.bungalow/spotify.cache.json';
+var sessions_file = os.homedir() + '/.bungalow/spotify.sessions.json';
 var SpotifyService = function (session) {
     
     var self = this;
@@ -24,8 +26,99 @@ var SpotifyService = function (session) {
     if (fs.existsSync(cache_file)) {
         this.cache = JSON.parse(fs.readFileSync(cache_file));
     }
-
+    this.session = null;
 };
+
+
+SpotifyService.prototype.getSessions = function () {
+    if (fs.existsSync(sessions_file)) {
+        return JSON.parse(fs.readFileSync(sessions_file));
+    }
+}
+
+
+SpotifyService.prototype.setSessions = function (value) {
+    fs.writeFileSync(sessions_file, JSON.strigify(value));
+}
+
+
+SpotifyService.prototype.getArtistByName = function (name) {
+    var self = this;
+    return new Promise(function (resolve, fail) {
+       self.search('artist:"' + encodeURI(name) + '"', 'artist', 0, 28).then(function (result) {
+            if (result.objects.length < 1)  {
+                fail({error: 'Not found'});
+                return
+            };
+            music.getArtist(result.objects[0].id).then(function (result) {
+                resolve(result);
+            }, function (err) {
+                fail(err).send();
+            })
+        }, function (err) {
+            fail(err).send();
+        }) 
+    });
+}
+
+
+SpotifyService.prototype.getAlbumByName = function (name, artist) {
+    var self = this;
+    return new Promise(function (resolve, fail) {
+       self.search('album:"' + encodeURI(name) + '" AND artist:"' + encodeURI(artist.name) + "'", 'album', 0, 28).then(function (result) {
+            if (result.objects.length < 1)  {
+                fail({error: 'Not found'});
+                return
+            };
+            music.getAlbum(result.objects[0].id).then(function (result) {
+                resolve(result);
+            }, function (err) {
+                fail(err).send();
+            })
+        }, function (err) {
+            fail(err).send();
+        }) 
+    });
+}
+
+
+SpotifyService.prototype.getAlbumByUPC = function (name, artist) {
+    var self = this;
+    return new Promise(function (resolve, fail) {
+       self.search('upc:"' + encodeURI(name) + '"', 'album', 0, 28).then(function (result) {
+            if (result.objects.length < 1)  {
+                fail({error: 'Not found'});
+                return
+            };
+            music.getAlbum(result.objects[0].id).then(function (result) {
+                resolve(result);
+            }, function (err) {
+                fail(err).send();
+            })
+        }, function (err) {
+            fail(err).send();
+        }) 
+    });
+}
+
+
+
+SpotifyService.prototype.getTrackByName = function (name, artist, album) {
+    var self = this;
+    return new Promise(function (resolve, fail) {
+       self.search('"' + name + '" AND album:"' + encodeURI(name) + '" AND artist:"' + encodeURI(artist.name) + "'", 'track', 0, 28).then(function (result) {
+            if (result.objects.length < 1)  {
+                fail({error: 'Not found'});
+                return
+            };
+             resolve(result);
+       
+        }, function (err) {
+            fail(err).send();
+        }) 
+    });
+}
+
 
 
 SpotifyService.prototype.getLoginUrl = function () {
@@ -94,20 +187,12 @@ SpotifyService.prototype.getCurrentTrack = function () {
 
 SpotifyService.prototype.getAccessToken = function () {
     try {
-        return this.req.session.spotifyAccessToken; //JSON.parse(fs.readFileSync(os.homedir() + '/.bungalow/spotify_access_token.json'));
+            return this.req.session.spotifyAccessToken; //JSON.parse(fs.readFileSync(os.homedir() + '/.bungalow/spotify_access_token.json'));
     } catch (e) {
         return null;
     }
 }
 
-SpotifyService.prototype.setAccessToken = function (req, accessToken) {
-
-    accessToken.time = new Date().getTime();
-    console.log(accessToken);
-    fs.writeFileSync(os.homedir() + '/.bungalow/spotify_access_token.json', JSON.stringify(accessToken));
-    req.session.spotifyAccessToken = accessToken;
-    
-}
 
 SpotifyService.prototype.isAccessTokenValid = function () {
     var access_token = this.getAccessToken();
@@ -118,8 +203,7 @@ SpotifyService.prototype.isAccessTokenValid = function () {
 SpotifyService.prototype.refreshAccessToken = function () {
     var self = this;
     return new Promise(function (resolve, fail) {
-        var accessToken = self.getAccessToken();
-        var refresh_token = accessToken.refresh_token;
+        var refresh_token = self.session.refresh_token;
         request({
             url: 'https://accounts.spotify.com/api/token',
             method: 'POST',
@@ -132,16 +216,16 @@ SpotifyService.prototype.refreshAccessToken = function () {
                 'Authorization': 'Basic ' + new Buffer(self.apikeys.client_id + ':' + self.apikeys.client_secret).toString('base64')
             }
         }, function (error, response, body) {
-            if (error || 'error' in body) {
+            var result = JSON.parse(body);
+            if (error || 'error' in result) {
                 fail();
                 return;
             }
             console.log(self.apikeys);
-            var accessToken = JSON.parse(body);
-            accessToken.refresh_token = refresh_token 
-            self.setAccessToken(accessToken);
-             console.log("Refresh", body);
-            resolve(JSON.parse(body));
+            self.session = result;
+            music.res.cookie('spotify', JSON.stringify(result));
+             console.log("Refresh", result);
+            resolve(result);
         });
     });
 }
@@ -187,242 +271,254 @@ SpotifyService.prototype._request = function (method, path, payload, postData) {
         if (!isNaN(payload.limit)) payload.limit = parseInt(payload.limit);
         if (!payload.limit) payload.limit = 30;
         
+        function _do(_resolve, _fail) {
         
-        var token = self.getAccessToken();
-        var cachePath = path + '?offset=' + payload.offset + '&limit=' + payload.limit + '';
-        if (method === 'GET', self.cache instanceof Object && cachePath in self.cache) {
-            var result = self.cache[cachePath];
-            resolve(result);
-            return;
-        }
+            var cachePath = path + '?offset=' + payload.offset + '&limit=' + payload.limit + '';
+            if (false && method === 'GET' && self.cache instanceof Object && cachePath in self.cache) {
+                var result = self.cache[cachePath];
+                resolve(result);
+                return;
+            }
+            
+            if (!self.session) {
+                fail(401);
+                return;
+            }
+            var headers = {};
+            
+            headers["Authorization"] = "Bearer " + self.session.access_token;
+            if (payload instanceof Object) {
+                headers["Content-type"] = "application/json";
         
-        if (!token) {
-            fail(401);
-            return;
-        }
-        var headers = {};
-        
-        headers["Authorization"] = "Bearer " + token.access_token;
-        if (payload instanceof Object) {
-            headers["Content-type"] = "application/json";
-    
-        } else {
-            headers["Content-type"] = ("application/x-www-form-urlencoded");
-        }
-        var url = 'https://api.spotify.com/v1' + path;
-        request({
-                method: method,
-                url: url,
-                headers: headers,
-                qs: payload,
-                body: JSON.stringify(postData)
-            },
-            function (error, response, body) {
-                if (error) {
-                    fail(error);
-                    return;
-                }
-                    function formatObject (obj, i) {
-                   obj.position = payload.offset + i; 
-                   obj.p = payload.offset + i + 1; 
-                   obj.service = service;
-                   obj.version = '';
-                   if (obj.type == 'country') {
-                       obj.president = null;
-                        if (obj.id == 'qi') {
-                            obj.president = {
-                                id: 'drsounds',
-                                name: 'Dr. Sounds',
-                                uri: 'spotify:user:drsounds',
-                                images: [{
-                                    url: 'http://blog.typeandtell.com/sv/wp-content/uploads/sites/2/2017/06/Alexander-Forselius-dpi27-750x500.jpg'
-                                }],
-                                type: 'user'
-                            }   
-                        }
-                       
-                   }
-                   
-                   if (obj.type == 'user') {
-                       obj.manages = [];
-                       obj.controls = []
-                       if (obj.id == 'buddhalow' || obj.id == 'buddhalowmusic' || obj.id == 'drsounds') {
-                           obj.president_of = [{
-                               id: 'qi',
-                               name: 'Qiland',
-                               uri: 'bungalow:country:qi',
-                               type: 'country'
-                           }];
-                            obj.manages.push({
-                                id: '2FOROU2Fdxew72QmueWSUy',
-                                type: 'artist',
-                                name: 'Dr. Sounds',
-                                uri: 'spotify:artist:2FOROU2Fdxew72QmueWSUy',
-                                images: [{
-                                    url: 'http://blog.typeandtell.com/sv/wp-content/uploads/sites/2/2017/06/Alexander-Forselius-dpi27-750x500.jpg'
-                                }]
-                            });
-                            obj.manages.push({
-                                id: "1yfKXBG0YdRc5wrAwSgTBj",
-                                name: "Buddhalow",
-                                uri: "spotify:artist:1yfKXBG0YdRc5wrAwSgTBj",
-                                type: "artist",
-                                images: [{
-                                    url: 'https://static1.squarespace.com/static/580c9426bebafb840ac7089e/t/580d061de3df28929ead74ac/1477248577786/_MG_0082.jpg?format=1500w'
-                                }]
-                            });
-                        }
-                   }
-                   if (obj.type == 'artist') {
-                       obj.users = [];
-                        obj.labels = [];
-                       if (obj.id == '2FOROU2Fdxew72QmueWSUy') {
-                           obj.users.push({
-                               id: 'drsounds',
-                               name: 'Dr. Sounds',
-                               type: 'user',
-                               url: 'spotify:user:drsounds'
-                           });
-                           obj.labels.push({
-                               id: 'buddhalowmusic',
-                               name: 'Buddhalow Music',
-                               type: 'label',
-                               uri: 'spotify:label:buddhalowmusic'
-                           });
-                           obj.labels.push({
-                               id: 'drsounds',
-                               name: 'Dr. Sounds',
-                               type: 'label',
-                               uri: 'spotify:label:drsounds'
-                           });
-                           obj.labels.push({
-                               id: 'recordunion',
-                               name: 'Record Union',
-                               type: 'label',
-                               uri: 'spotify:label:recordunion'
-                           });
-                           obj.labels.push({
-                               id: 'substream',
-                               name: 'Substream',
-                               type: 'label',
-                               uri: 'spotify:label:substream'
-                           });
+            } else {
+                headers["Content-type"] = ("application/x-www-form-urlencoded");
+            }
+            var url = 'https://api.spotify.com/v1' + path;
+            request({
+                    method: method,
+                    url: url,
+                    headers: headers,
+                    qs: payload,
+                    body: JSON.stringify(postData)
+                },
+                function (error, response, body) {
+                    if (error) {
+                        fail(error);
+                        return;
+                    }
+                        function formatObject (obj, i) {
+                       obj.position = payload.offset + i; 
+                       obj.p = payload.offset + i + 1; 
+                       obj.service = service;
+                       obj.version = '';
+                       if (obj.type == 'country') {
+                           obj.president = null;
+                            if (obj.id == 'qi') {
+                                obj.president = {
+                                    id: 'drsounds',
+                                    name: 'Dr. Sounds',
+                                    uri: 'spotify:user:drsounds',
+                                    images: [{
+                                        url: 'http://blog.typeandtell.com/sv/wp-content/uploads/sites/2/2017/06/Alexander-Forselius-dpi27-750x500.jpg'
+                                    }],
+                                    type: 'user'
+                                }   
+                            }
+                           
                        }
                        
-                       
-                   }
-                  
-                   if ('duration_ms' in obj) {
-                       obj.duration = obj.duration_ms / 1000;
-                   }
-                   if (obj.type === 'user') {
-                       obj.name = obj.id;
-                   }
-                   if ('track' in obj) {
-                       obj = assign(obj, obj.track);
-                   }
-                   if ('artists' in obj) {
-                       obj.artists = obj.artists.map(formatObject);
-                   }
-                   if ('album' in obj) {
-                       obj.album = formatObject(obj.album, 0);
-                   }
-                   if ('display_name' in obj) {
-                       obj.name = obj.display_name;
-                   }
-                   if (obj.name instanceof String && obj.name.indexOf('-') != -1) {
-                       obj.version = obj.substr(obj.indexOf('-') + '-'.length).trim();
-                       obj.name = obj.name.split('-')[0];
-                   }
-                   return obj;
-                }
-                try {
-                    if (response.statusCode < 200 ||response.statusCode > 299) {
-                            console.log(body);
-                        fail(response.statusCode);
-                        return;
+                       if (obj.type == 'user') {
+                           obj.manages = [];
+                           obj.controls = []
+                           if (obj.id == 'buddhalow' || obj.id == 'buddhalowmusic' || obj.id == 'drsounds') {
+                               obj.president_of = [{
+                                   id: 'qi',
+                                   name: 'Qiland',
+                                   uri: 'bungalow:country:qi',
+                                   type: 'country'
+                               }];
+                                obj.manages.push({
+                                    id: '2FOROU2Fdxew72QmueWSUy',
+                                    type: 'artist',
+                                    name: 'Dr. Sounds',
+                                    uri: 'spotify:artist:2FOROU2Fdxew72QmueWSUy',
+                                    images: [{
+                                        url: 'http://blog.typeandtell.com/sv/wp-content/uploads/sites/2/2017/06/Alexander-Forselius-dpi27-750x500.jpg'
+                                    }]
+                                });
+                                obj.manages.push({
+                                    id: "1yfKXBG0YdRc5wrAwSgTBj",
+                                    name: "Buddhalow",
+                                    uri: "spotify:artist:1yfKXBG0YdRc5wrAwSgTBj",
+                                    type: "artist",
+                                    images: [{
+                                        url: 'https://static1.squarespace.com/static/580c9426bebafb840ac7089e/t/580d061de3df28929ead74ac/1477248577786/_MG_0082.jpg?format=1500w'
+                                    }]
+                                });
+                            }
+                       }
+                       if (obj.type == 'artist') {
+                           obj.users = [];
+                            obj.labels = [];
+                           if (obj.id == '2FOROU2Fdxew72QmueWSUy') {
+                               obj.users.push({
+                                   id: 'drsounds',
+                                   name: 'Dr. Sounds',
+                                   type: 'user',
+                                   url: 'spotify:user:drsounds'
+                               });
+                               obj.labels.push({
+                                   id: 'buddhalowmusic',
+                                   name: 'Buddhalow Music',
+                                   type: 'label',
+                                   uri: 'spotify:label:buddhalowmusic'
+                               });
+                               obj.labels.push({
+                                   id: 'drsounds',
+                                   name: 'Dr. Sounds',
+                                   type: 'label',
+                                   uri: 'spotify:label:drsounds'
+                               });
+                               obj.labels.push({
+                                   id: 'recordunion',
+                                   name: 'Record Union',
+                                   type: 'label',
+                                   uri: 'spotify:label:recordunion'
+                               });
+                               obj.labels.push({
+                                   id: 'substream',
+                                   name: 'Substream',
+                                   type: 'label',
+                                   uri: 'spotify:label:substream'
+                               });
+                           }
+                           
+                           
+                       }
+                      
+                       if ('duration_ms' in obj) {
+                           obj.duration = obj.duration_ms / 1000;
+                       }
+                       if (obj.type === 'user') {
+                           obj.name = obj.id;
+                       }
+                       if ('track' in obj) {
+                           obj = assign(obj, obj.track);
+                       }
+                       if ('artists' in obj) {
+                           obj.artists = obj.artists.map(formatObject);
+                       }
+                       if ('album' in obj) {
+                           obj.album = formatObject(obj.album, 0);
+                       }
+                       if ('display_name' in obj) {
+                           obj.name = obj.display_name;
+                       }
+                       if (obj.name instanceof String && obj.name.indexOf('-') != -1) {
+                           obj.version = obj.substr(obj.indexOf('-') + '-'.length).trim();
+                           obj.name = obj.name.split('-')[0];
+                       }
+                       return obj;
                     }
-                    if (body == "") {
-                        resolve({
-                            status: response.statusCode
-                        });
-                        return;
-                    }
-                    var data = JSON.parse(body);
-                    if (!data) {
-                        console.log(body);
-                        fail(response.statusCode);
-                    }
-                    if ('error' in data || !data) {
-                        console.log(body);
-                        fail(response.statusCode);
-                        return;
-                    }
-                    data.service = {
-                        name: 'Spotify',
-                        id: 'spotify',
-                        type: 'service',
-                        description: ''
-                    }
-                    if ('items' in data) {
-                        data.objects = data.items;
-                        delete data.items;
-                    }
-                    if ('categories' in data) {
-                        data.objects = data.categories.items.map((o) => {
-                            o.uri = 'spotify:category:' + o.id;
-                            o.type = 'category';
-                            o.images = o.icons;
-                            delete o.icons;
-                            return o;
-                        });
-                        delete data.categories;
-                    }
-                    if ('tracks' in data) {
-                        if (data.tracks instanceof Array) {
-                            data.objects = data.tracks;
-                        } else {
-                            data.objects = data.tracks.items;
+                    try {
+                        if (response.statusCode < 200 ||response.statusCode > 299) {
+                                console.log(body);
+                            fail(response.statusCode);
+                            return;
                         }
-                        delete data.tracks;
+                        if (body == "") {
+                            resolve({
+                                status: response.statusCode
+                            });
+                            return;
+                        }
+                        var data = JSON.parse(body);
+                        if (!data) {
+                            console.log(body);
+                            fail(response.statusCode);
+                        }
+                        if ('error' in data || !data) {
+                            console.log(body);
+                            fail(response.statusCode);
+                            return;
+                        }
+                        data.service = {
+                            name: 'Spotify',
+                            id: 'spotify',
+                            type: 'service',
+                            description: ''
+                        }
+                        if ('items' in data) {
+                            data.objects = data.items;
+                            delete data.items;
+                        }
+                        if ('categories' in data) {
+                            data.objects = data.categories.items.map((o) => {
+                                o.uri = 'spotify:category:' + o.id;
+                                o.type = 'category';
+                                o.images = o.icons;
+                                delete o.icons;
+                                return o;
+                            });
+                            delete data.categories;
+                        }
+                        if ('tracks' in data) {
+                            if (data.tracks instanceof Array) {
+                                data.objects = data.tracks;
+                            } else {
+                                data.objects = data.tracks.items;
+                            }
+                            delete data.tracks;
+                        }
+                        if (!('images' in data)) {
+                            data.images = [{
+                                url: ''
+                            }];
+                        }
+                        if ('album' in data) {
+                            data.album = formatObject(data.album);
+                            delete data.albums;
+                        }
+                        
+                        if ('owner' in data) {
+                            data.owner = formatObject(data.owner);
+                            delete data.albums;
+                        }
+                        if ('artists' in data) {
+                            data.objects = data.artists.items;
+                        }
+                        if ('objects' in data && data.objects && data.type != 'artist') {
+                            data.objects = data.objects.map(formatObject);
+                           
+                        }
+                        if ('artists' in data && data.type == 'album') {
+                           data.artists = data.artists.map(formatObject);
+                        }
+                        data = formatObject(data, 0);
+                        console.log(data);
+                        data.updated_at = new Date().getTime();
+                        self.cache[cachePath] = data;
+                        fs.writeFileSync(cache_file, JSON.stringify(self.cache));
+                        resolve(data);
+                        
+                    } catch (e) {
+                        
+                        fail(e);
                     }
-                    if (!('images' in data)) {
-                        data.images = [{
-                            url: ''
-                        }];
-                    }
-                    if ('album' in data) {
-                        data.album = formatObject(data.album);
-                        delete data.albums;
-                    }
-                    
-                    if ('owner' in data) {
-                        data.owner = formatObject(data.owner);
-                        delete data.albums;
-                    }
-                    if ('artists' in data) {
-                        data.objects = data.artists.items;
-                    }
-                    if ('objects' in data && data.objects && data.type != 'artist') {
-                        data.objects = data.objects.map(formatObject);
-                       
-                    }
-                    if ('artists' in data && data.type == 'album') {
-                       data.artists = data.artists.map(formatObject);
-                    }
-                    data = formatObject(data, 0);
-                    console.log(data);
-                    data.updated_at = new Date().getTime();
-                    self.cache[cachePath] = data;
-                    fs.writeFileSync(cache_file, JSON.stringify(self.cache));
-                    resolve(data);
-                    
-                } catch (e) {
-                    
-                    fail(e);
                 }
-            }
-        );
+                
+            );
+        }
+        
+        if (new Date().getTime() - self.session.issued > self.session.expires_in) {
+            self.refreshAccessToken().then(function (result) {
+                _do(resolve, fail);
+            });
+        }  else {
+            _do(resolve, fail);
+        }
+        
+        
     });
 }
 
@@ -1865,11 +1961,8 @@ SpotifyService.prototype.requestAccessToken = function (code) {
                     fail({'error': 'Request problem'});
                     return;
                 }
-                self.nodeSpotifyService.setAccessToken(data);
+                self.setSession(data);
                 self.nodeSpotifyService.getMe().then(function (data) {
-                    localStorage.setItem("me", JSON.stringify(data.body));
-
-
                     resolve(data);
                 });
 
@@ -2187,6 +2280,17 @@ var music = new SpotifyService();
 
 var app = express();
 
+app.use(cookieParser());
+
+app.use(function (req, res, next) {
+    music.req = req;
+    music.res = res;
+   var session = req.cookies['spotify'];
+   if (!!session)
+       music.session = JSON.parse(session);
+      next();
+});
+
 
 app.get('/login', function (req, res) {
     res.redirect(music.getLoginUrl());
@@ -2195,31 +2299,949 @@ app.get('/login', function (req, res) {
 app.get('/authenticate', function (req, res) {
     console.log("Got authenticate request");
     console.log(req);
-    music.authenticate(req, function (err, success) {
+    music.authenticate(req, function (err, session) {
          if (err != null) {
             res.status(err).send({error: err});
-            res.end();
+            res.send();
         }
         console.log("success");
+        res.cookie('spotify', JSON.stringify(session));
         res.statusCode = 200;
-        res.json(success);
-        res.end();
+        res.json(session);
+        res.send();
     });
 }); 
 
-app.get('/authenticate', function (req, res) {
-    console.log("Got authenticate request");
-    console.log(req);
-    music.authenticate(req, function (err, success) {
-         if (err != null) {
-            res.status(err).send({error: err});
-            res.end();
-        }
-        console.log("success");
-        res.statusCode = 200;
-        res.json(success);
-        res.end();
+
+app.get('/login', function (req, res) {
+    res.redirect(music.getLoginUrl());
+});
+
+
+app.get('/user/:username/playlist', function (req, res) {
+    
+    
+    
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+    music.getPlaylistsByUser(req.params.username, req.query.offset, req.query.limit).then(function (result) {
+    
+        res.json(result);
+    }, function (err) {
+        res.status(err).send({error: err});
     });
-}); 
-module.exports = app;
+});
+
+
+app.get('/label/:username/playlist', function (req, res) {
+    
+    
+    
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+    music.getPlaylistsByUser(req.params.username, req.query.offset, req.query.limit).then(function (result) {
+    
+        res.json(result);
+    }, function (err) {
+        res.status(err).send({error: err});
+    });
+});
+
+app.get('/user/:username', function (req, res) {
+    
+    
+    
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+    music.getUser(req.params.username).then(function (result) {
+    
+        res.json(result);
+    }, function (err) {
+        res.status(err).send({error: err});
+    });
+});
+
+
+app.get('/curator/:username/playlist', function (req, res) {
+    
+    
+    
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+    music.getPlaylistsByUser(req.params.username, req.query.offset, req.query.limit).then(function (result) {
+    
+        res.json(result);
+    }, function (err) {
+        res.status(err).send({error: err});
+    });
+});
+
+
+app.get('/curator/:username', function (req, res) {
+    
+    
+    
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+    music.getUser(req.params.username).then(function (result) {
+    
+        res.json(result);
+    }, function (err) {
+        res.status(err).send({error: err});
+    });
+});
+
+app.get('/me/playlist', function (req, res) {
+    
+    
+    
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+    music.getMyPlaylists(req.query.offset, req.query.limit).then(function (result) {
+    
+        res.json(result);
+    }, function (err) {
+        res.status(err).send({error: err});
+    });
+});
+
+app.get('/me/folder', function (req, res) {
+    
+    
+    
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+    music.getFolders(req.query.offset, req.query.limit).then(function (result) {
+    
+        res.json(result);
+    }, function (err) {
+        res.status(err).send({error: err});
+    });
+});
+
+app.get('/me/release', function (req, res) {
+    
+    
+    
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }   
+    music.getMyReleases(req.query.offset, req.query.limit).then(function (result) {
+    
+        res.json(result);
+    }, function (err) {
+        res.status(err).send({error: err});
+    });
+});
+
+
+
+app.get('/internal/library', function (req, res) {
+    
+    
+    
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+    res.json({
+        id: 'library',
+        name: 'Library',
+        uri: 'bungalow:internal:library',
+        description: 'My Library',
+        type: 'library'
+    });
+});
+
+
+
+app.put('/me/player/play', function (req, res) {
+    
+    
+    
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+    music.playTrack(body).then(function (result) {
+        music.getCurrentTrack().then(function (result) {
+            res.json(result);
+            
+        });
+    }, function (err) {
+        res.status(err).send({error: err});
+    });
+});
+
+
+app.get('/me/player/currently-playing', function (req, res) {
+    
+    
+    
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+    music.getCurrentTrack(body).then(function (result) {
+    
+        res.json(result);
+    }, function (err) {
+        res.status(err).send({error: err});
+    });
+});
+
+
+
+app.get('/internal/library/track', function (req, res) {
+    
+    
+    
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+    music.getMyTracks(req.query.offset, req.query.limit).then(function (result) {
+    
+        res.json(result);
+    }, function (err) {
+        res.status(err).send({error: err});
+    });
+});
+
+app.get('/category', function (req, res) {
+    
+    
+    
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+    music.getCategories(req.query.offset, req.query.limit).then(function (result) {
+    
+        res.json(result);
+    }, function (err) {
+        res.status(err).send({error: err});
+    });
+});
+
+
+app.get('/category/:identifier', function (req, res) {
+    
+    
+    
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+    music.getCategory(req.params.identifier, req.query.offset, req.query.limit).then(function (result) {
+    
+        res.json(result);
+    }, function (err) {
+        res.status(err).send({error: err});
+    });
+});
+
+
+app.get('/label/:identifier', function (req, res) {
+    /*wiki.req = req;
+    var name = decodeURIComponent(req.params.identifier);
+    wiki.describe(name).then(function (description) {
+        res.json({
+            name: name,
+            description: description || ''
+        });
+    });*/
+    res.json({
+        id: req.params.identifier,
+        name: req.params.identifier
+    });
+});
+
+
+
+
+app.get('/label/:identifier/release', function (req, res) {
+       
+    var name = decodeURIComponent(req.params.identifier);
+    music.search('label:"' + req.params.identifier + '"', req.params.limit, req.params.offset, 'album').then(function (result) {
+        res.json(result);
+    }, function (err) {
+        res.status(err).send({error: err});
+    });
+});
+
+
+app.get('/category/:identifier/playlist', function (req, res) {
+    
+    
+    
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+    music.getPlaylistsInCategory(req.params.identifier, req.query.offset, req.query.limit).then(function (result) {
+    
+        res.json(result);
+    }, function (err) {
+        res.status(err).send({error: err});
+    });
+});
+
+
+app.get('/search', function (req, res) {
+    
+    
+    
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+    music.search(req.query.q, req.query.limit, req.query.offset, req.query.type).then(function (result) {
+    
+        res.json(result);
+    }, function (err) {
+        res.status(err).send({error: err});
+    });
+});
+
+
+app.get('/search/:query/track', function (req, res) {
+    
+    
+    
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+    music.search(req.query.q, req.query.limit, req.query.offset, 'track').then(function (result) {
+    
+        res.json(result);
+    }, function (err) {
+        res.status(err).send({error: err});
+    });
+});
+
+
+app.get('/search/:query/artist', function (req, res) {
+    
+    
+    
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+    music.search(req.query.q, req.query.limit, req.query.offset, 'artist').then(function (result) {
+    
+        res.json(result);
+    }, function (reject) {
+        res.json(reject);
+    });
+});
+
+
+app.get('/search/:query/release', function (req, res) {
+    
+    
+    
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+    music.search(req.query.q, req.query.limit, req.query.offset, 'album').then(function (result) {
+    
+        res.json(result);
+    }, function (err) {
+        res.status(err).send({error: err});
+    });
+});
+
+
+app.get('/search/:query/album', function (req, res) {
+    
+    
+    
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+    music.search(req.query.q, req.query.limit, req.query.offset, 'album').then(function (result) {
+    
+        res.json(result);
+    }, function (err) {
+        res.status(err).send({error: err});
+    });
+});
+
+
+app.get('/search/:query/playlist', function (req, res) {
+    
+    
+    
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+    music.search(req.query.q, req.query.limit, req.query.offset, 'playlist').then(function (result) {
+    
+        res.json(result);
+    }, function (err) {
+        res.status(err).send({error: err});
+    });
+});
+
+
+app.get('/user/:username/playlist/:identifier', function (req, res) {
+    
+    
+    
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+    music.getPlaylist(req.params.username, req.params.identifier).then(function (result) {
+        
+        res.json(result);
+    }, function (err) {
+        res.status(err).send({error: err});
+    });
+});
+
+
+app.get('/user/:username/playlist/:identifier/track', function (req, res) {
+    
+    
+    
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+    music.getTracksInPlaylist(req.params.username, req.params.identifier, req.query.offset, req.query.limit).then(function (result) {
+        res.json(result);
+    }, function (err) {
+        res.status(err).send({error: err});
+    });
+});
+
+
+app.post('/user/:username/playlist/:identifier/track', function (req, res) {
+    
+    
+    
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+    music.addTracksInPlaylist(req.params.username, req.params.identifier, body.tracks, body.position).then(function (result) {
+        res.json(result);
+    }, function (err) {
+        res.status(err).send({error: err});
+    });
+});
+
+
+app.put('/user/:username/playlist/:identifier/track', function (req, res) {
+    
+    
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+    music.reorderTracksInPlaylist(req.params.username, req.params.identifier, body.range_start, body.range_length + 1, parseInt(body.insert_before)).then(function (result) {
+        res.json(result);
+    }, function (err) {
+        res.status(err).send({error: err});
+    });
+});
+
+
+app.get('/artist/:identifier', function (req, res) {
+    
+    
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+    
+    if (req.params.identifier.length == 22) {
+        music.getArtist(req.params.identifier).then(function (result) {
+            res.json(result).send();
+        }, function (err) {
+            res.status(err).json({error: err}).send();
+        });
+    } else {
+        music.search('artist:"' + encodeURI(req.params.identifier) + '"', 'artist', 0, 28).then(function (result) {
+            if (result.objects.length < 1)  {
+                res.status(404).send({error: 'Not found'});
+                return
+            };
+            music.getArtist(result.objects[0].id).then(function (result) {
+                res.json(result).send();
+            }, function (err) {
+                res.status(500).json(err).send();
+            })
+        }, function (err) {
+            res.status(500).send(JSON.parse(err));
+        })
+    }
+});
+
+
+
+app.get('/artist/:artist_id/album/:album_id', function (req, res) {
+    
+    
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+    
+    if (req.params.identifier.length == 23) {
+        music.getArtist(req.params.identifier).then(function (result) {
+            res.json(result).send();
+        }, function (err) {
+            res.status(err).json({error: err}).send();
+        });
+    } else {
+        
+    }
+});
+
+
+app.get('/artist/:identifier/info', function (req, res) {
+    music.getArtist(req.params.identifier).then(function (result) {
+        musicInfo.getArtistInfo(result.name).then(function (artistInfo) {
+           res.json(artistInfo);
+        }, function (err) {
+            res.status(err).send({error: err});
+        });
+    }, function (err) {
+        res.status(err).send({error: err});
+    });
+})
+
+
+
+app.get('/artist/:identifier/about', function (req, res) {
+    
+    
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+    
+    music.getArtist(req.params.identifier).then(function (result) {
+        var data = {
+            monthlyListners: 0,
+            weeklyListeners: 0,
+            dailyListeners: 0,
+            discoveredOn: {
+                objects: []
+            },
+            rank: 1000000,
+            biography: null
+        };
+        wiki.describe(result.name).then(function (description) {
+            if (description == null) {
+                wiki.describe(result.name + ' (Music artist)').then(function (description) {
+                    if (result.description != null) {   
+                        data.biography = {
+                            service: {
+                                id: 'wikipedia',
+                                name: 'Wikipedia',
+                                uri: 'bungalow:service:wikipedia',
+                                type: 'service',
+                                images: [{
+                                    url: ''
+                                }]
+                            },
+                            body: description
+                        };
+                    }
+                    res.json(data);
+                }, function (err) {
+                    res.status(reject).send({error: reject});
+                });
+                return;
+            }
+            data.biography = {
+                service: {
+                    id: 'wikipedia',
+                    name: 'Wikipedia',
+                    uri: 'bungalow:service:wikipedia',
+                    type: 'service',
+                    images: [{
+                        url: ''
+                    }]
+                },
+                body: description
+            };
+            res.json(data);
+        }, function (err) {
+            res.status(reject).send({error: reject});
+        });
+    }, function (reject) {
+        res.status(reject).send({error: reject});
+    });
+});
+
+app.get('/artist/:identifier/top/:count', function (req, res) {
+    
+    
+    
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+    music.getArtist(req.params.identifier).then(function (result) {
+        music.getTopTracksForArtist(result.id, 'se').then(function (toplist) {
+            toplist.objects = toplist.  objects.slice(0, req.params.count);
+            res.json({
+                name: 'Top Tracks',
+                type: 'toplist',
+                images: [{
+                    url: '/images/toplist.svg'
+                }],
+                id: 'toplist',
+                uri: result.uri + ':top:' + req.params.count,
+                description: 'Top ' + req.params.count + ' tracks for <sp-link uri="' + result.uri + '">' + result.name + '</sp-link>',
+                tracks: toplist
+            });
+        }, function (err) {
+            res.statusCode = 500;
+            res.json(err);
+        });
+    }, function (reject) {
+        res.status(reject).send({error: reject});
+    }, function (err) {
+        res.status(reject).send({error: reject});
+        res.json(err);
+    });
+});
+
+
+app.get('/artist/:identifier/top/:count/track', function (req, res) {
+    
+    
+    
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+    music.getTopTracksForArtist(req.params.identifier, 'se', req.params.offset, req.params.limit).then(function (result) {
+       result.objects = result.objects.slice(0, req.params.count);
+       res.json(result);
+        res.send();
+    }, function (reject) {
+        res.status(reject).send({error: reject});
+        res.send();
+    });
+});
+
+app.get('/artist/:identifier/release', function (req, res) {
+    
+    
+    
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+    
+        music.getReleasesByArtist(req.params.identifier, 'release', req.query.offset, req.query.limit).then(function (result) {
+        res.json(result);
+        res.send();
+    }, function (reject) {
+        res.status(reject).send({error: reject});
+        res.send();
+    });
+});
+
+
+app.get('/artist/:identifier/album', function (req, res) {
+    
+    
+    
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+    
+    music.getReleasesByArtist(req.params.identifier, 'album', req.query.offset, req.query.limit).then(function (result) {
+        res.json(result);
+        res.send();
+    }, function (reject) {
+        res.status(reject);
+        res.send();
+    });
+});
+
+
+
+app.get('/artist/:identifier/single', function (req, res) {
+    
+    
+    
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+        
+    music.getReleasesByArtist(req.params.identifier, 'single', req.query.offset, req.query.limit).then(function (result) {
+        res.json(result);
+        res.send();
+    }, function (reject) {
+        res.status(reject).send({error: reject});
+        res.send();
+    });
+});
+
+
+app.get('/artist/:identifier/appears_on', function (req, res) {
+    
+    
+    
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+    console.log(req.query);
+    music.getReleasesByArtist(req.params.identifier, 'appears_on', req.query.offset, req.query.limit).then(function (result) {
+        res.json(result);
+        res.send();
+    }, function (reject) {
+        res.status(reject).send({error: reject});
+        res.send();
+    });
+});
+
+
+app.get('/artist/:identifier/compilation', function (req, res) {
+    
+    
+    
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+    
+    music.getReleasesByArtist(req.params.identifier, 'compilation', req.query.offset, req.query.limit).then(function (result) {
+        res.json(result);
+        res.send();
+    }, function (reject) {
+        res.status(reject).send({error: reject});
+        res.send();
+    });
+});
+
+
+app.get('/album/:identifier', function (req, res) {
+    
+    
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+    
+    music.getAlbum(req.params.identifier).then(function (result) {
+        res.json(result);
+        res.send();
+    }, function (reject) {
+        res.status(reject).send({error: reject});
+        res.send();
+    });
+});
+
+app.get('/album/:identifier/track', function (req, res) {
+    
+    
+    
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+    
+    music.getTracksInAlbum(req.params.identifier, req.query.offset, req.query.limit).then(function (result) {
+        res.json(result);
+        res.send();
+    }, function (reject) {
+        res.status(reject).send({error: reject});
+        res.send();
+    });
+});
+
+
+app.get('/country/:identifier', function (req, res) {
+    
+    
+    
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+    
+    music.getCountry(req.params.identifier).then(function (result) {
+        res.json(result);
+        res.send();
+    }, function (reject) {
+        res.status(reject).send({error: reject});
+        res.send();
+    });
+});
+
+
+app.get('/country/:identifier/top/:limit', function (req, res) {
+    
+    
+    
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+    
+    music.getTopListForCountry(req.params.identifier, req.params.limit).then(function (result) {
+        res.json(result);
+        res.send();
+    }, function (reject) {
+        res.status(reject).send({error: reject});
+        res.send();
+    });
+});
+
+
+app.get('/country/:identifier/top/:limit/track', function (req, res) {
+    
+    
+    
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+    
+    music.getTopTracksInCountry(req.params.identifier, req.params.limit).then(function (result) {
+        res.json(result);
+        res.send();
+    }, function (reject) {
+        res.status(reject).send({error: reject});
+        res.send();
+    });
+});
+
+app.get('/featured/playlist', function (req, res) {
+    
+    
+    
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }   
+    music.getFeaturedPlaylists(req.query.offset, req.query.limit).then(function (result) {
+    
+        res.json(result);
+        res.send();
+    }, function (reject) {
+        res.json(reject);
+        res.send();
+    });
+});
+
+app.get('/track/:identifier', function (req, res) {
+    
+    music.getTrack(req.params.identifier).then(function (result) {
+        res.json(result);
+        res.send();
+    }, function (reject) {
+        res.status(reject).send({error: reject});
+        res.send();
+    });
+})
+
+
+app.get('/artist/:artist_name/release/:release_name/track/:track_name', function (req, res) {
+    
+    music.getTrackByName(req.params.artist_name, req.params.release_name, req.params.track_name).then(function (result) {
+        res.json(result);
+        res.send();
+    }, function (reject) {
+        res.status(reject).send({error: reject});
+        res.send();
+    });
+})
+
+
+app.get('/upc/:upc', function (req, res) {
+    
+    music.getReleaseByUPC(req.params.upc).then(function (result) {
+        res.json(result);
+        res.send();
+    }, function (reject) {
+        res.status(reject).send({error: reject});
+        res.send();
+    });
+})
+
+
+app.get('/isrc/:identifier', function (req, res) {
+    
+    music.getTrack(req.params.identifier).then(function (result) {
+        res.json(result);
+        res.send();
+    }, function (reject) {
+        res.status(reject).send({error: reject});
+        res.send();
+    });
+})
+
+
+
+app.get('/category/:identifier/playlist', function (req, res) {
+    
+    music.getPlaylistsInCategory(req.params.identifier).then(function (result) {
+        res.json(result);
+        res.send();
+    }, function (reject) {
+        res.json(reject);
+        res.send();
+    });
+})
+
+app.get('/category/:identifier', function (req, res) {
+    
+    music.getCategory(req.params.identifier).then(function (result) {
+        res.json(result);
+        res.send();
+    }, function (reject) {
+        res.status(reject).send({error: reject});
+        res.send();
+    });
+})
+
+app.get('/category', function (req, res) {
+    
+    music.getCategories(req.params.identifier).then(function (result) {
+        res.json(result);
+        res.send();
+    }, function (reject) {
+        res.status(reject).send({error: reject});
+        res.send();
+    });
+})
+
+
+module.exports = {
+    app: app
+};  
 
