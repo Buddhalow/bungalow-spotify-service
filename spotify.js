@@ -1960,7 +1960,7 @@ SpotifyService.prototype.request = function (method, url, payload, postData, req
 
 SpotifyService.prototype.getPlaylistsFeaturingArtist = function (name, offset, limit) {
     return new Promise(function (resolve, reject) {
-       searchEngine.search('"' + name + '"', 'open.spotify.com/user', 'items(title,link)', '015841603533789813658%3Ajfzga7ppx0s', offset, limit).then(function (result) {
+       searchEngine.search('"' + name + '"', 'open.spotify.com/user', 'items(title,link)', '015841603533789813658%3Ajfzga7ppx0s', offset + 1, limit).then(function (result) {
             var data = {};
             data.objects = result.items.map((o) => {
                 var uri = 'spotify:' + o.link.split('/').slice(3).join(':');
