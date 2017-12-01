@@ -1970,6 +1970,7 @@ SpotifyService.prototype.getPlaylistsFeaturingArtist = function (name, offset, l
                     name: o.title,
                     type: 'playlist',
                     user: {
+                        name: uri.split(':')[2],
                         id: uri.split(':')[2],
                         name: uri.split(':')[2],
                         type: 'user'
