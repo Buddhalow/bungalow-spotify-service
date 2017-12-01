@@ -3,15 +3,21 @@ var os = require('os');
 var request = require('request');
 var express = require('express');
 var assign = require('object-assign');
+var searchEngine = require('../google/google.js');
 var Promise = require("es6-promise").Promise;
 var cookieParser = require('cookie-parser');
 var queryString = require('query-string');
 var api_key_file = os.homedir() + '/.bungalow/spotify.key.json';
 var cache_file = os.homedir() + '/.bungalow/spotify.cache.json';
 var sessions_file = os.homedir() + '/.bungalow/spotify.sessions.json';
+var google_api_key_file = os.homedir() + '/.bungalow/google.key.json';
+
+var searchEngine = searchEngine.service;
+
 var SpotifyService = function (session) {
     
     var self = this;
+    
     this.cache = {};
     this.isPlaying = false;
     
@@ -24,7 +30,11 @@ var SpotifyService = function (session) {
     this.me = null;
     this.cache = {};
     if (fs.existsSync(cache_file)) {
-        this.cache = JSON.parse(fs.readFileSync(cache_file));
+       try {
+            this.cache = JSON.parse(fs.readFileSync(cache_file));
+        } catch (e) {
+            
+        }
     }
     this.session = null;
 };
@@ -144,7 +154,7 @@ SpotifyService.prototype.authenticate = function (req, resolve) {
     }, function (error, response, body) {
         console.log(error);
         var result = JSON.parse(body);
-        result.issued = new Date().getTime();
+        result.issued = '' + new Date().getTime();
         if (error || !result.access_token) {
             resolve(error);
             return;
@@ -223,6 +233,8 @@ SpotifyService.prototype.refreshAccessToken = function () {
             }
             console.log(self.apikeys);
             self.session = result;
+            music.res.clearCookie('spotify');
+            
             music.res.cookie('spotify', JSON.stringify(result));
              console.log("Refresh", result);
             resolve(result);
@@ -510,12 +522,13 @@ SpotifyService.prototype._request = function (method, path, payload, postData) {
             );
         }
         
-        if (new Date().getTime() - self.session.issued > self.session.expires_in) {
-            self.refreshAccessToken().then(function (result) {
+        if (new Date().getTime() - parseInt(self.session.issued) < self.session.expires_in) {
+            
+             _do(resolve, fail);
+        }  else {
+           self.refreshAccessToken().then(function (result) {
                 _do(resolve, fail);
             });
-        }  else {
-            _do(resolve, fail);
         }
         
         
@@ -1943,6 +1956,33 @@ SpotifyService.prototype.request = function (method, url, payload, postData, req
 }
 
 
+SpotifyService.prototype.getPlaylistsFeaturingArtist = function (name, offset, limit) {
+    return new Promise(function (resolve, reject) {
+       searchEngine.search('"' + name + '"', 'open.spotify.com/user', 'items(title,link)', '015841603533789813658%3Ajfzga7ppx0s', offset, limit).then(function (result) {
+            var data = {};
+            data.objects = result.items.map((o) => {
+                var uri = 'spotify:' + o.link.split('/').slice(3).join(':');
+                return {
+                    id: uri.split(':')[4],
+                    uri: uri,
+                    name: o.title,
+                    type: 'playlist',
+                    user: {
+                        id: uri.split(':')[2],
+                        name: uri.split(':')[2],
+                        type: 'user'
+                    }
+                }
+            });
+            data.service = result.service;
+            resolve(data);
+       }, function (err) {
+            reject(err);
+        });
+    });
+}
+
+
 SpotifyService.prototype.requestAccessToken = function (code) {
     var self = this;
     var promise = new Promise(function (resolve, fail) {
@@ -1952,7 +1992,7 @@ SpotifyService.prototype.requestAccessToken = function (code) {
         headers["Content-type"] = ("application/x-www-form-urlencoded");
 
 
-        request({
+            request({
                 url: 'https://accounts.spotify.com/api/token',
                 headers: headers, form: "grant_type=authorization_code&code=" + code + "&redirect_uri=" + encodeURI(self.apikeys.redirect_uri)},
             function (error, response, body) {
@@ -2286,7 +2326,7 @@ app.use(function (req, res, next) {
     music.req = req;
     music.res = res;
    var session = req.cookies['spotify'];
-   if (!!session)
+    if (!!session)
        music.session = JSON.parse(session);
       next();
 });
@@ -2305,7 +2345,9 @@ app.get('/authenticate', function (req, res) {
             res.send();
         }
         console.log("success");
-        res.cookie('spotify', JSON.stringify(session));
+        res.clearCookie('spotify');
+        var strSession = JSON.stringify(session);
+        res.cookie('spotify', strSession);
         res.statusCode = 200;
         res.json(session);
         res.send();
@@ -2801,6 +2843,33 @@ app.get('/artist/:identifier', function (req, res) {
 });
 
 
+app.get('/artist/:identifier/playlist', function (req, res) {
+    
+    
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+    
+    if (req.params.identifier.length == 22) {
+        music.getArtist(req.params.identifier).then(function (artist) {
+            music.getPlaylistsFeaturingArtist(artist.name).then(function (result) {
+                res.json(result).send(); 
+            }, function (err) {
+                res.status(500).json(err).send();
+            });
+        }, function (err) {
+            res.status(500).json(err).send();
+        });
+    } else {
+       music.getPlaylistsFeaturingArtist(req.params.identifier).then(function (result) {
+            res.json(result).send(); 
+        }, function (err) {
+            res.status(500).json(err).send();
+        });
+    }
+});
+
 
 app.get('/artist/:artist_id/album/:album_id', function (req, res) {
     
@@ -2874,7 +2943,7 @@ app.get('/artist/:identifier/about', function (req, res) {
                     }
                     res.json(data);
                 }, function (err) {
-                    res.status(reject).send({error: reject});
+                    res.status(500).send({error: reject});
                 });
                 return;
             }
@@ -2892,10 +2961,10 @@ app.get('/artist/:identifier/about', function (req, res) {
             };
             res.json(data);
         }, function (err) {
-            res.status(reject).send({error: reject});
+            res.status(500).send({error: reject});
         });
     }, function (reject) {
-        res.status(reject).send({error: reject});
+        res.status(500).send({error: reject});
     });
 });
 
@@ -2926,9 +2995,9 @@ app.get('/artist/:identifier/top/:count', function (req, res) {
             res.json(err);
         });
     }, function (reject) {
-        res.status(reject).send({error: reject});
+        res.status(500).send({error: reject});
     }, function (err) {
-        res.status(reject).send({error: reject});
+        res.status(500).send({error: reject});
         res.json(err);
     });
 });
@@ -2947,7 +3016,7 @@ app.get('/artist/:identifier/top/:count/track', function (req, res) {
        res.json(result);
         res.send();
     }, function (reject) {
-        res.status(reject).send({error: reject});
+        res.status(500).send({error: reject});
         res.send();
     });
 });
@@ -2965,7 +3034,7 @@ app.get('/artist/:identifier/release', function (req, res) {
         res.json(result);
         res.send();
     }, function (reject) {
-        res.status(reject).send({error: reject});
+        res.status(500).send({error: reject});
         res.send();
     });
 });
@@ -2984,7 +3053,7 @@ app.get('/artist/:identifier/album', function (req, res) {
         res.json(result);
         res.send();
     }, function (reject) {
-        res.status(reject);
+        res.status(500);
         res.send();
     });
 });
@@ -3004,7 +3073,7 @@ app.get('/artist/:identifier/single', function (req, res) {
         res.json(result);
         res.send();
     }, function (reject) {
-        res.status(reject).send({error: reject});
+        res.status(500).send({error: reject});
         res.send();
     });
 });
@@ -3023,7 +3092,7 @@ app.get('/artist/:identifier/appears_on', function (req, res) {
         res.json(result);
         res.send();
     }, function (reject) {
-        res.status(reject).send({error: reject});
+        res.status(500).send({error: reject});
         res.send();
     });
 });
@@ -3042,7 +3111,7 @@ app.get('/artist/:identifier/compilation', function (req, res) {
         res.json(result);
         res.send();
     }, function (reject) {
-        res.status(reject).send({error: reject});
+        res.status(500).send({error: reject});
         res.send();
     });
 });
@@ -3060,7 +3129,7 @@ app.get('/album/:identifier', function (req, res) {
         res.json(result);
         res.send();
     }, function (reject) {
-        res.status(reject).send({error: reject});
+        res.status(500).send({error: reject});
         res.send();
     });
 });
@@ -3078,7 +3147,7 @@ app.get('/album/:identifier/track', function (req, res) {
         res.json(result);
         res.send();
     }, function (reject) {
-        res.status(reject).send({error: reject});
+        res.status(500).send({error: reject});
         res.send();
     });
 });
@@ -3097,7 +3166,7 @@ app.get('/country/:identifier', function (req, res) {
         res.json(result);
         res.send();
     }, function (reject) {
-        res.status(reject).send({error: reject});
+        res.status(500).send({error: reject});
         res.send();
     });
 });
@@ -3116,7 +3185,7 @@ app.get('/country/:identifier/top/:limit', function (req, res) {
         res.json(result);
         res.send();
     }, function (reject) {
-        res.status(reject).send({error: reject});
+        res.status(500).send({error: reject});
         res.send();
     });
 });
@@ -3135,7 +3204,7 @@ app.get('/country/:identifier/top/:limit/track', function (req, res) {
         res.json(result);
         res.send();
     }, function (reject) {
-        res.status(reject).send({error: reject});
+        res.status(500).send({error: reject});
         res.send();
     });
 });
@@ -3164,7 +3233,7 @@ app.get('/track/:identifier', function (req, res) {
         res.json(result);
         res.send();
     }, function (reject) {
-        res.status(reject).send({error: reject});
+        res.status(500).send({error: reject});
         res.send();
     });
 })
@@ -3176,7 +3245,7 @@ app.get('/artist/:artist_name/release/:release_name/track/:track_name', function
         res.json(result);
         res.send();
     }, function (reject) {
-        res.status(reject).send({error: reject});
+        res.status(500).send({error: reject});
         res.send();
     });
 })
@@ -3188,7 +3257,7 @@ app.get('/upc/:upc', function (req, res) {
         res.json(result);
         res.send();
     }, function (reject) {
-        res.status(reject).send({error: reject});
+        res.status(500).send({error: reject});
         res.send();
     });
 })
@@ -3200,7 +3269,7 @@ app.get('/isrc/:identifier', function (req, res) {
         res.json(result);
         res.send();
     }, function (reject) {
-        res.status(reject).send({error: reject});
+        res.status(500).send({error: reject});
         res.send();
     });
 })
@@ -3224,7 +3293,7 @@ app.get('/category/:identifier', function (req, res) {
         res.json(result);
         res.send();
     }, function (reject) {
-        res.status(reject).send({error: reject});
+        res.status(500).send({error: reject});
         res.send();
     });
 })
@@ -3235,7 +3304,7 @@ app.get('/category', function (req, res) {
         res.json(result);
         res.send();
     }, function (reject) {
-        res.status(reject).send({error: reject});
+        res.status(500).send({error: reject});
         res.send();
     });
 })
