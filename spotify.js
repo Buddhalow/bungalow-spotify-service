@@ -420,7 +420,11 @@ SpotifyService.prototype._request = function (method, path, payload, postData) {
                            obj = assign(obj, obj.track);
                        }
                        if ('artists' in obj) {
-                           obj.artists = obj.artists.map(formatObject);
+                           try {
+                               obj.artists = obj.artists.map(formatObject);
+                           } catch (e) {
+                               
+                           }
                        }
                        if ('album' in obj) {
                            obj.album = formatObject(obj.album, 0);
@@ -2829,7 +2833,7 @@ app.get('/artist/:identifier', function (req, res) {
             res.status(err).json({error: err}).send();
         });
     } else {
-        music.search('artist:"' + encodeURI(req.params.identifier) + '"', 'artist', 0, 28).then(function (result) {
+        music.search('artist:"' + encodeURI(req.params.identifier) + '"', 0, 1, 'artist').then(function (result) {
             if (result.objects.length < 1)  {
                 res.status(404).send({error: 'Not found'});
                 return
@@ -2840,7 +2844,7 @@ app.get('/artist/:identifier', function (req, res) {
                 res.status(500).json(err).send();
             })
         }, function (err) {
-            res.status(500).send(JSON.parse(err));
+            res.status(500).send(JSON.stringify(err));
         })
     }
 });
