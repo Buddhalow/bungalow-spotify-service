@@ -2061,7 +2061,7 @@ SpotifyService.prototype.request = function (method, url, payload, postData, req
 SpotifyService.prototype.getPlaylistsFeaturingArtist = function (name, exclude, offset, limit) {
     return new Promise(function (resolve, reject) {
         var q = 'name=' + name + '&exclude=' + exclude + '&offset=' + offset + '&limit=' + limit;
-        var filePath = os.homedir() + '/.bungalow/' + md5(q) + '.json';
+        var filePath = os.homedir() + '/.bungalow/cache/' + md5(q) + '.json';
         
         if (fs.existsSync(filePath)) {
             var result = JSON.parse(fs.readFileSync(filePath));
@@ -2069,11 +2069,11 @@ SpotifyService.prototype.getPlaylistsFeaturingArtist = function (name, exclude, 
             return;
         }
         
-        var promises = [1,2,3,4,5, 6, 7, 8, 9].map(function (i) {
+        var promises = [0, 1,2,3].map(function (i) {
             return new Promise(
                 function (resolve2, reject2) {
                     offset = parseInt(offset);
-                    searchEngine.search('"' + name + '"', 'open.spotify.com/user', 'items(title,link)', '015106568197926965801%3Aif4ytykb8ws', exclude, ((offset) / 10) + 1 + i, limit).then(function (result) {
+                    searchEngine.search('"' + name + '"', 'open.spotify.com/user', 'items(title,link)', '015106568197926965801%3Aif4ytykb8ws', exclude, offset + (i * limit), limit).then(function (result) {
                         var data = {};
                         try {
                             data.objects = result.items.map((o) => {
@@ -2982,7 +2982,7 @@ app.get('/artist/:identifier/playlist', function (req, res) {
         body = (req.body);
     }
     music.getArtistByName(req.params.identifier).then(function (artist) {
-        music.getPlaylistsFeaturingArtist(artist.name, artist.user.id, req.query.offset).then(function (result) {
+        music.getPlaylistsFeaturingArtist(artist.name, artist.user.id, req.query.offset, 10).then(function (result) {
             res.json(result).send(); 
         }, function (err) {
             res.status(500).json(err).send();
