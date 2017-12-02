@@ -1,5 +1,7 @@
 var fs = require('fs');
 var os = require('os');
+
+var md5 = require('md5');
 var request = require('request');
 var express = require('express');
 var assign = require('object-assign');
@@ -11,7 +13,6 @@ var api_key_file = os.homedir() + '/.bungalow/spotify.key.json';
 var cache_file = os.homedir() + '/.bungalow/spotify.cache.json';
 var sessions_file = os.homedir() + '/.bungalow/spotify.sessions.json';
 var google_api_key_file = os.homedir() + '/.bungalow/google.key.json';
-
 var searchEngine = searchEngine.service;
 
 var SpotifyService = function (session) {
@@ -2059,6 +2060,15 @@ SpotifyService.prototype.request = function (method, url, payload, postData, req
 
 SpotifyService.prototype.getPlaylistsFeaturingArtist = function (name, exclude, offset, limit) {
     return new Promise(function (resolve, reject) {
+        var q = 'name=' + name + '&exclude=' + exclude + '&offset=' + offset + '&limit=' + limit;
+        var filePath = os.homedir() + '/.bungalow/' + md5(q) + '.json';
+        
+        if (fs.existsSync(filePath)) {
+            var result = JSON.parse(fs.readFileSync(filePath));
+            resolve(result);
+            return;
+        }
+        
         var promises = [1,2,3,4,5, 6, 7, 8, 9].map(function (i) {
             return new Promise(
                 function (resolve2, reject2) {
@@ -2109,6 +2119,7 @@ SpotifyService.prototype.getPlaylistsFeaturingArtist = function (name, exclude, 
                         data.objects.push(o);
                     })
                 });
+                fs.writeFileSync(filePath, JSON.stringify(data));
                 resolve(data);
             }
         ).catch(function (errors) {
