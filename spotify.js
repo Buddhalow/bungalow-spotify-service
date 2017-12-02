@@ -650,15 +650,7 @@ SpotifyService.prototype.getReleasesByArtist = function (id, release_type, offse
             album_type: release_type
         }).then(function (result) {
         
-            Promise.all(result.objects.map(function (album) {
-                return self.getTracksInAlbum(album.id);
-            })).then(function (tracklists) {
-                for (var i = 0; i < tracklists.length; i++) {
-                    result.objects[i].tracks = tracklists[i];
-            
-                }
-                resolve(result); 
-            });
+            resolve(result);
         }, function (err) {
             console.log(err);
             fail(err);
@@ -682,15 +674,7 @@ SpotifyService.prototype.getReleases = function (id, release_type, offset, limit
             album_type: release_type
         }).then(function (result) {
         
-            Promise.all(result.objects.map(function (album) {
-                return self.getTracksInAlbum(album.id);
-            })).then(function (tracklists) {
-                for (var i = 0; i < tracklists.length; i++) {
-                    result.objects[i].tracks = tracklists[i];
-            
-                }
-                resolve(result); 
-            });
+            resolve(result);
         }, function (err) {
             console.log(err);
             fail(err);
@@ -1051,7 +1035,7 @@ SpotifyService.prototype.getPlaylistsByUser = function (username, offset, limit)
             limit: limit,
             offset: offset
         }).then(function (result) {
-           Promise.all(result.objects.map(function (playlist) {
+           /*Promise.all(result.objects.map(function (playlist) {
                 return self.getTracksInPlaylist(playlist.owner.id, playlist.id);
             })).then(function (tracklists) {
                 try {
@@ -1064,7 +1048,8 @@ SpotifyService.prototype.getPlaylistsByUser = function (username, offset, limit)
                 }
             }, function (err) {
                 fail(err);
-            });
+            });*/
+            resolve(result);
         }, function (err) {
             fail(err);
         });
@@ -2130,6 +2115,80 @@ SpotifyService.prototype.getPlaylistsFeaturingArtist = function (name, exclude, 
 }
 
 
+
+
+SpotifyService.prototype.getPlaylistsFeaturingRelease = function (name, artist, exclude, offset, limit) {
+    return new Promise(function (resolve, reject) {
+        var q = 'name=' + name + '&exclude=' + exclude + '&offset=' + offset + '&limit=' + limit;
+        var filePath = os.homedir() + '/.bungalow/cache/' + md5(q) + '.json';
+        
+        if (fs.existsSync(filePath)) {
+            var result = JSON.parse(fs.readFileSync(filePath));
+            resolve(result);
+            return;
+        }
+        
+        var promises = [0, 1,2,3].map(function (i) {
+            return new Promise(
+                function (resolve2, reject2) {
+                    offset = parseInt(offset);
+                    searchEngine.search('"' + artist  + ' - ' + name + '"', 'open.spotify.com/user', 'items(title,link)', '015106568197926965801%3Aif4ytykb8ws', exclude, offset + (i * limit), limit).then(function (result) {
+                        var data = {};
+                        try {
+                            data.objects = result.items.map((o) => {
+                                var uri = 'spotify:' + o.link.split('/').slice(3).join(':');
+                                return {
+                                    id: uri.split(':')[4],
+                                    uri: uri,
+                                    name: o.title,
+                                    type: 'playlist',
+                                    user: {
+                                        name: uri.split(':')[2],
+                                        id: uri.split(':')[2],
+                                        uri: 'spotify:user:' + uri.split(':')[2],
+                                        name: uri.split(':')[2],
+                                        type: 'user'
+                                    }
+                                }
+                            });
+                            data.service = result.service;
+                            resolve2(data);
+                        } catch (e) {
+                            console.log(e);
+                            reject2(e);
+                        }
+                    }, function (err) {
+                        reject2(err);
+                    });
+                }
+            );
+        });
+        Promise.all(promises).then(
+            function (results) {
+                var data = {
+                    objects: [],
+                    service: {
+                        id: 'google',
+                        name: 'Google',
+                        type: 'service'
+                    }
+                };
+                results.map(function (r) {
+                    r.objects.map(function (o) {
+                        data.objects.push(o);
+                    })
+                });
+                fs.writeFileSync(filePath, JSON.stringify(data));
+                resolve(data);
+            }
+        ).catch(function (errors) {
+            console.log(errors);
+            reject(errors);
+        });;
+    })
+}
+
+
 SpotifyService.prototype.requestAccessToken = function (code) {
     var self = this;
     var promise = new Promise(function (resolve, fail) {
@@ -2983,6 +3042,45 @@ app.get('/artist/:identifier/playlist', function (req, res) {
     }
     music.getArtistByName(req.params.identifier).then(function (artist) {
         music.getPlaylistsFeaturingArtist(artist.name, artist.user.id, req.query.offset, 10).then(function (result) {
+            res.json(result).send(); 
+        }, function (err) {
+            res.status(500).json(err).send();
+        });
+    }, function (error) {
+        res.status(500).json(error).send();
+    })
+});
+
+
+
+app.get('/album/:identifier/playlist', function (req, res) {
+    
+    
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+    music.getAlbum(req.params.identifier).then(function (release) {
+        music.getPlaylistsFeaturingRelease(release.name, release.artists[0].name, '', req.query.offset, 10).then(function (result) {
+            res.json(result).send(); 
+        }, function (err) {
+            res.status(500).json(err).send();
+        });
+    }, function (error) {
+        res.status(500).json(error).send();
+    })
+});
+
+
+app.get('/release/:identifier/playlist', function (req, res) {
+    
+    
+    var body = {};
+    if (req.body) {
+        body = (req.body);
+    }
+    music.getAlbum(req.params.identifier).then(function (release) {
+        music.getPlaylistsFeaturingRelease(release.name, '', req.query.offset, 10).then(function (result) {
             res.json(result).send(); 
         }, function (err) {
             res.status(500).json(err).send();
