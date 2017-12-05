@@ -15,6 +15,10 @@ var sessions_file = os.homedir() + '/.bungalow/spotify.sessions.json';
 var google_api_key_file = os.homedir() + '/.bungalow/google.key.json';
 var searchEngine = searchEngine.service;
 
+
+var cache = require('../cache/cache.js');
+
+
 var SpotifyService = function (session) {
     
     var self = this;
@@ -37,6 +41,7 @@ var SpotifyService = function (session) {
             
         }
     }
+    
     this.session = null;
 };
 
@@ -219,6 +224,7 @@ SpotifyService.prototype.isAccessTokenValid = function () {
     return new Date() < new Date(access_token.time) + access_token.expires_in * 1000;
 }
 
+
 SpotifyService.prototype.refreshAccessToken = function () {
     var self = this;
     return new Promise(function (resolve, fail) {
@@ -252,6 +258,8 @@ SpotifyService.prototype.refreshAccessToken = function () {
         });
     });
 }
+
+
 SpotifyService.prototype.getMe = function () {
     return JSON.parse(localStorage.getItem("me"));
 }
@@ -297,6 +305,12 @@ SpotifyService.prototype._request = function (method, path, payload, postData) {
         function _do(_resolve, _fail) {
         
             var cachePath = path + '?offset=' + payload.offset + '&limit=' + payload.limit + '';
+            
+            if (method == 'GET' && cache.isCached(cachePath)) {
+                resolve(cache.load(cachePath));
+                return;
+            }
+            
             if (false && method === 'GET' && self.cache instanceof Object && cachePath in self.cache) {
                 var result = self.cache[cachePath];
                 resolve(result);
@@ -317,7 +331,7 @@ SpotifyService.prototype._request = function (method, path, payload, postData) {
                 headers["Content-type"] = ("application/x-www-form-urlencoded");
             }
             var url = 'https://api.spotify.com/v1' + path;
-            request({
+        request({
                     method: method,
                     url: url,
                     headers: headers,
@@ -538,6 +552,7 @@ SpotifyService.prototype._request = function (method, path, payload, postData) {
                         console.log(data);
                         data.updated_at = new Date().getTime();
                         self.cache[cachePath] = data;
+                        cache.save(cachePath, data);
                         fs.writeFileSync(cache_file, JSON.stringify(self.cache));
                         resolve(data);
                         
@@ -2046,10 +2061,9 @@ SpotifyService.prototype.request = function (method, url, payload, postData, req
 SpotifyService.prototype.getPlaylistsFeaturingArtist = function (name, exclude, offset, limit) {
     return new Promise(function (resolve, reject) {
         var q = 'name=' + name + '&exclude=' + exclude + '&offset=' + offset + '&limit=' + limit;
-        var filePath = os.homedir() + '/.bungalow/cache/' + md5(q) + '.json';
         
-        if (fs.existsSync(filePath)) {
-            var result = JSON.parse(fs.readFileSync(filePath));
+        if (cache.isCached(q)) {
+            var result = cache.load(q);
             resolve(result);
             return;
         }
@@ -2104,7 +2118,7 @@ SpotifyService.prototype.getPlaylistsFeaturingArtist = function (name, exclude, 
                         data.objects.push(o);
                     })
                 });
-                fs.writeFileSync(filePath, JSON.stringify(data));
+                cache.save(q, data);
                 resolve(data);
             }
         ).catch(function (errors) {
