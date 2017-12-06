@@ -16,6 +16,12 @@ var google_api_key_file = os.homedir() + '/.bungalow/google.key.json';
 var searchEngine = searchEngine.service;
 
 
+process.on('unhandledRejection', error => {
+  // Will print "unhandledRejection err is not defined"
+  console.log('unhandledRejection', error.message);
+});
+
+
 var cache = require('../cache/cache.js');
 
 
@@ -397,7 +403,7 @@ SpotifyService.prototype._request = function (method, path, payload, postData) {
                        if (obj.type == 'artist') {
                            obj.users = [];
                             obj.labels = [];
-                            obj.user = {
+                            obj.manager = {
                                 id: '',
                                 name: '',
                                 uri: 'spotify:user:',
@@ -405,7 +411,7 @@ SpotifyService.prototype._request = function (method, path, payload, postData) {
                                 username: ''
                             };
                            if (obj.id == '2FOROU2Fdxew72QmueWSUy') {
-                                obj.user = {
+                                obj.manager = {
                                    id: 'drsounds',
                                    name: 'Dr. Sounds',
                                    type: 'user',
@@ -565,7 +571,7 @@ SpotifyService.prototype._request = function (method, path, payload, postData) {
             );
         }
         
-        if (new Date().getTime() - self.session.issued < self.session.expires_in * 1000) {
+        if (self.session != null && new Date().getTime() - self.session.issued < self.session.expires_in * 1000) {
             
              _do(resolve, fail);
         }  else {
@@ -2479,11 +2485,7 @@ SpotifyService.prototype.getAlbum = function (id) {
         self._request('GET', '/albums/' + id).then(function (album) {
             album.image = album.images[0].url;
             album.tracks = [];
-            self.getAlbumTracks(album.id).then(function (data) {
-                album.tracks = data;
-                resolve(album);
-
-            });
+            resolve(album);
         }, function (err) {
             fail(err);
         });
@@ -2581,9 +2583,6 @@ app.get('/login', function (req, res) {
 
 
 app.get('/user/:username/playlist', function (req, res) {
-    
-    
-    
     var body = {};
     if (req.body) {
         body = (req.body);
@@ -3055,7 +3054,12 @@ app.get('/artist/:identifier/playlist', function (req, res) {
         body = (req.body);
     }
     music.getArtistByName(req.params.identifier).then(function (artist) {
-        music.getPlaylistsFeaturingArtist(artist.name, artist.user.id, req.query.offset, 10).then(function (result) {
+        var manager_id = '';
+        if ('manager' in artist) {
+            manager_id = artist.manager.id;
+        }
+        var offset = req.query.offset || 0;
+        music.getPlaylistsFeaturingArtist(artist.name, manager_id, offset, 10).then(function (result) {
             res.json(result).send(); 
         }, function (err) {
             res.status(500).json(err).send();
