@@ -299,7 +299,7 @@ SpotifyService.prototype._request = function (method, path, payload, postData) {
         
         function _do(_resolve, _fail) {
         
-            var cachePath = path + '?offset=' + payload.offset + '&limit=' + payload.limit + '';
+            var cachePath = path + '?offset=' + payload.offset + '&limit=' + payload.limit + '&q=' +payload.q + '&type=' + payload.type;
             
             if (method == 'GET' && cache.isCached(cachePath)) {
                 resolve(cache.load(cachePath));
@@ -742,7 +742,7 @@ SpotifyService.prototype.getCountry = function (code) {
                 type: 'country',
                 service: service,
                 images: [{
-                    url: 'https://media.licdn.com/mpr/mpr/shrink_200_200/AAEAAQAAAAAAAA2NAAAAJDliMzE1NTYzLThjOTMtNDRiZi1iNjc1LWQxYTlmNzVlM2M4NQ.png'
+                    url: 'http://buddhalow.se/wp-content/uploads/2017/12/qi.png'
                 }]
             });
             return;
@@ -780,7 +780,7 @@ SpotifyService.prototype.getTopTracksInCountry = function (code, limit, offset) 
                 id: 'qi',
                 service: service
             };
-            var url = '/users/spotify/playlists/37i9dQZF1Cz2XVi756juiX'; // '/users/drsounds/playlists/2KVJSjXlaz1PFl6sbOC5AU';
+            var url = '/me/top/tracks'; // '/users/drsounds/playlists/2KVJSjXlaz1PFl6sbOC5AU';
             self._request('GET', url).then(function (result) {
                 try {
                     request({
@@ -852,7 +852,7 @@ SpotifyService.prototype.getTopListForCountry = function (code, limit, offset) {
                 type: 'country',
                 service: service,
                 images: [{
-                    url: 'https://media.licdn.com/mpr/mpr/shrink_200_200/AAEAAQAAAAAAAA2NAAAAJDliMzE1NTYzLThjOTMtNDRiZi1iNjc1LWQxYTlmNzVlM2M4NQ.png'
+                    url: 'http://buddhalow.se/wp-content/uploads/2017/12/qi.png'
                 }],
                 in: {
                     id: code,
@@ -2394,7 +2394,7 @@ SpotifyService.prototype.search = function (query, offset, limit, type) {
     var self = this;
     var promise = new Promise(function (resolve, fail) {
         self._request('GET', '/search', {
-            q: query,
+            q: (query),
             limit: limit,
             offset: offset,
             type: type
@@ -2893,7 +2893,7 @@ app.get('/search/:query/track', function (req, res) {
     if (req.body) {
         body = (req.body);
     }
-    music.search(req.query.q, req.query.limit, req.query.offset, 'track').then(function (result) {
+    music.search(req.params.query,req.query.offset, req.query.limit, 'track').then(function (result) {
     
         res.json(result);
     }, function (err) {
