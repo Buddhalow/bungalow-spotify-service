@@ -185,15 +185,8 @@ SpotifyService.prototype.authenticate = function (req, resolve) {
     
 }
 
-SpotifyService.prototype.setMe = function (me) {
-    this.req.session.me = me;
-}
 
-SpotifyService.prototype.getMe = function (me) {
-    return this.req.session.me;
-}
-
-SpotifyService.prototype.getCurrentUser = function () {
+SpotifyService.prototype.getMe = function () {
     var self = this;
     return new Promise(function (resolve, fail) {
         self._request('GET', '/me').then(function (result) {
@@ -202,6 +195,8 @@ SpotifyService.prototype.getCurrentUser = function () {
             ]
             
             resolve(result);
+        }, function (error) {
+            fail(error);
         });
     })
 }
@@ -266,15 +261,9 @@ SpotifyService.prototype.refreshAccessToken = function () {
 }
 
 
-SpotifyService.prototype.getMe = function () {
-    return JSON.parse(localStorage.getItem("me"));
-}
-
-
-
 var service = {
     id: 'spotify',
-    uri: 'bungalow:service:spotify',
+    uri: 'service:spotify',
     type: 'service',
     name: 'Spotify',
     description: 'Music service'
@@ -337,12 +326,13 @@ SpotifyService.prototype._request = function (method, path, payload, postData) {
                 headers["Content-type"] = ("application/x-www-form-urlencoded");
             }
             var url = 'https://api.spotify.com/v1' + path;
-        request({
+            request({
                     method: method,
                     url: url,
                     headers: headers,
                     qs: payload,
-                    body: JSON.stringify(postData)
+                    json: true,
+                    body: (postData)
                 },
                 function (error, response, body) {
                     if (error) {
@@ -377,7 +367,7 @@ SpotifyService.prototype._request = function (method, path, payload, postData) {
                                obj.president_of = [{
                                    id: 'qi',
                                    name: 'Qiland',
-                                   uri: 'bungalow:country:qi',
+                                   uri: 'country:qi',
                                    type: 'country'
                                }];
                                 obj.manages.push({
@@ -492,7 +482,7 @@ SpotifyService.prototype._request = function (method, path, payload, postData) {
                             });
                             return;
                         }
-                        var data = JSON.parse(body);
+                        var data = (body);
                         if (!data) {
                             console.log(body);
                             fail(response.statusCode);
@@ -558,8 +548,12 @@ SpotifyService.prototype._request = function (method, path, payload, postData) {
                         console.log(data);
                         data.updated_at = new Date().getTime();
                         self.cache[cachePath] = data;
-                        cache.save(cachePath, data);
-                        fs.writeFileSync(cache_file, JSON.stringify(self.cache));
+                        if (method === 'GET') {
+                            cache.save(cachePath, data);
+                            fs.writeFileSync(cache_file, JSON.stringify(self.cache));
+                        } else {
+                            cache.invalidate(cachePath);
+                        }
                         resolve(data);
                         
                     } catch (e) {
@@ -983,7 +977,7 @@ SpotifyService.prototype.reorderTracksInPlaylist = function (username, identifie
 SpotifyService.prototype.addTracksToPlaylist = function (username, identifier, uris, position) {
     var self = this;
     return new Promise(function (resolve, fail) {
-        self._request('POST', '/users/' + username + '/playlists/' + identifier + '/tracks', {
+        self._request('POST', '/users/' + username + '/playlists/' + identifier + '/tracks', null, {
             position: position,
             uris: uris
         }).then(function (result) {
@@ -998,7 +992,7 @@ SpotifyService.prototype.addTracksToPlaylist = function (username, identifier, u
 SpotifyService.prototype.deleteTracksFromPlaylist = function (username, identifier, tracks) {
     var self = this;
     return new Promise(function (resolve, fail) {
-        self._request('DELETE', '/users/' + username + '/playlists/' + identifier + '/tracks', {
+        self._request('DELETE', '/users/' + username + '/playlists/' + identifier + '/tracks', null, {
            tracks: tracks
         }).then(function (result) {
            resolve(result); 
@@ -1170,6 +1164,23 @@ SpotifyService.prototype.getCategories = function (offset, limit) {
 /**
  * Returns user by id
  **/
+SpotifyService.prototype.getMyPlaylists = function (offset, limit) {
+    var self = this;
+    return new Promise(function (resolve, fail) {
+        self._request('GET', '/me/playlists', {
+            offset: offset,
+            limit: limit
+        }).then(function (result) {
+           resolve(result); 
+        }, function (err) {
+            fail(err);
+        });
+    });
+}
+
+/**
+ * Returns user by id
+ **/
 SpotifyService.prototype.getCategory = function (id, offset, limit) {
     var self = this;
     return new Promise(function (resolve, fail) {
@@ -1316,7 +1327,7 @@ SpotifyService.prototype.request = function (method, url, payload, postData, req
             }   
 
     
-            var parts = url.split(/\//g);
+            var parts = url.split(/\//);
             console.log(parts);
             if (parts[0] == 'internal') {
                 if (parts[1] == 'history') {
@@ -1368,7 +1379,7 @@ SpotifyService.prototype.request = function (method, url, payload, postData, req
                     }
                     resolve({
                         id: 'library',
-                        uri: 'bungalow:internal:library',
+                        uri: 'internal:library',
                         name: 'Library',
                         type: 'library',
                         description: ''
@@ -1621,7 +1632,7 @@ SpotifyService.prototype.request = function (method, url, payload, postData, req
                                 fail(500);
                             }
                             try {
-                                body = body.replace('spotify:', 'bungalow:');
+                                body = body.replace('spotify:', '');
                             
                                 var data = JSON.parse(body);
                             
@@ -1647,7 +1658,7 @@ SpotifyService.prototype.request = function (method, url, payload, postData, req
                         },
                         function (error, response, body) {
                            try {
-                                body = body.replace(/spotify\:/, 'bungalow:');
+                                
                             
                                 var data = JSON.parse(body);
                                 data.service = service;
@@ -1915,7 +1926,7 @@ SpotifyService.prototype.request = function (method, url, payload, postData, req
                                         service: {
                                             id: 'mock',
                                             name: 'Mock',
-                                            uri: 'bungalow:service:mock'
+                                            uri: 'service:mock'
                                         }
                                     });
                                 }
@@ -1924,7 +1935,7 @@ SpotifyService.prototype.request = function (method, url, payload, postData, req
                                     service: {
                                         id: 'mock',
                                         name: 'Mock',
-                                        uri: 'bungalow:service:mock'
+                                        uri: 'service:mock'
                                     }
                                 });
                             } else if (parts[4] == 'track') {
@@ -2314,30 +2325,12 @@ SpotifyService.followPlaylist = function (playlist) {
 }
 
 var Uri = function (uri) {
-    this.parts = uri.split(/\:/g);
+    this.parts = uri.split(/\:/);
     this.user = parts[2];
     this.playlist = parts[4];
     this.id = parts[3];
 }
 
-/**
- * Adds songs to a playlist
- **/
-SpotifyService.prototype.addTracksToPlaylist = function (user, playlist_id, uris, position) {
-    var self = this;
-    var promise = new Promise(function (resolve, fail) {
-        self.request("POST", "/users/" + user + "/playlists/" + playlist_id + "/tracks", {
-                "uris": uris, position: position
-        }).then(function () {
-            resolve();
-        }, function (err) {
-            fail(err);
-        });
-
-    });
-    return promise;
-
-}
 
 SpotifyService.prototype.getAlbumTracks = function (id) {
 
@@ -2428,13 +2421,16 @@ SpotifyService.prototype.loadPlaylist = function (user, id, callback) {
     return promise;
 }
 
-SpotifyService.prototype.createPlaylist = function (title) {
+SpotifyService.prototype.createPlaylist = function (data) {
     var self = this;
 
     var promise = new Promise(function (resolve, fail) {
-        var me = self.getMe();
-        self.request("POST", "/users/" + me.id + "/playlists", {name: title}).then(function (object) {
-            resolve(object);
+        self.getMe().then(function (me) {
+            self._request("POST", "/users/" + me.id + "/playlists", null, data).then(function (object) {
+                resolve(object);
+            }, function (err) {
+                fail(err);
+            });
         }, function (err) {
             fail(err);
         });
@@ -2582,6 +2578,14 @@ app.get('/login', function (req, res) {
 });
 
 
+app.get('/me/playlist', function (req, res) {
+    music.getMyPlaylists(req.query.offset || 0, req.query.limit || 50).then(function (result) {
+    
+        res.json(result);
+    }, function (err) {
+        res.status(err).send({error: err});
+    });
+})
 app.get('/user/:username/playlist', function (req, res) {
     var body = {};
     if (req.body) {
@@ -2723,7 +2727,7 @@ app.get('/internal/library', function (req, res) {
     res.json({
         id: 'library',
         name: 'Library',
-        uri: 'bungalow:internal:library',
+        uri: 'internal:library',
         description: 'My Library',
         type: 'library'
     });
@@ -3007,7 +3011,7 @@ app.post('/user/:username/playlist/:identifier/track', function (req, res) {
     if (req.body) {
         body = (req.body);
     }
-    music.addTracksInPlaylist(req.params.username, req.params.identifier, body.tracks, body.position).then(function (result) {
+    music.addTracksToPlaylist(req.params.username, req.params.identifier, body.tracks, body.position).then(function (result) {
         res.json(result);
     }, function (err) {
         res.status(err).send({error: err});
@@ -3173,7 +3177,7 @@ app.get('/artist/:identifier/about', function (req, res) {
                             service: {
                                 id: 'wikipedia',
                                 name: 'Wikipedia',
-                                uri: 'bungalow:service:wikipedia',
+                                uri: 'service:wikipedia',
                                 type: 'service',
                                 images: [{
                                     url: ''
@@ -3192,7 +3196,7 @@ app.get('/artist/:identifier/about', function (req, res) {
                 service: {
                     id: 'wikipedia',
                     name: 'Wikipedia',
-                    uri: 'bungalow:service:wikipedia',
+                    uri: 'service:wikipedia',
                     type: 'service',
                     images: [{
                         url: ''
@@ -3575,6 +3579,15 @@ app.get('/category', function (req, res) {
 })
 
 
+app.post('/me/playlist', function (req, res) {
+    music.createPlaylist(req.body).then(function (result) {
+        res.json(result);
+        res.send();
+    }, function (reject) {
+        res.status(500).send({error: reject});
+        res.send();
+    });
+})
 module.exports = {
     app: app
 };  
