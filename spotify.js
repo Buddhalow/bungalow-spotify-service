@@ -458,6 +458,7 @@ SpotifyService.prototype._request = function (method, path, payload, postData) {
                                
                            }
                        }
+                  
                        if ('album' in obj) {
                            obj.album = formatObject(obj.album, 0);
                        }
@@ -543,7 +544,10 @@ SpotifyService.prototype._request = function (method, path, payload, postData) {
                         }
                         if ('artists' in data && data.type == 'album') {
                            data.artists = data.artists.map(formatObject);
-                        }
+                        }  
+                        if ('albums' in data && data.type != 'artist') {
+                           data.objects = data.albums.items.map(formatObject);
+                        }  
                         data = formatObject(data, 0);
                         console.log(data);
                         data.updated_at = new Date().getTime();
@@ -2910,7 +2914,7 @@ app.get('/search/:query/artist', function (req, res) {
     if (req.body) {
         body = (req.body);
     }
-    music.search(req.query.q, req.query.limit, req.query.offset, 'artist').then(function (result) {
+    music.search(req.params.query, req.query.limit, req.query.offset, 'artist').then(function (result) {
     
         res.json(result);
     }, function (reject) {
@@ -2927,7 +2931,7 @@ app.get('/search/:query/release', function (req, res) {
     if (req.body) {
         body = (req.body);
     }
-    music.search(req.query.q, req.query.limit, req.query.offset, 'album').then(function (result) {
+    music.search(req.params.query, req.query.limit, req.query.offset, 'album').then(function (result) {
     
         res.json(result);
     }, function (err) {
@@ -2944,7 +2948,7 @@ app.get('/search/:query/album', function (req, res) {
     if (req.body) {
         body = (req.body);
     }
-    music.search(req.query.q, req.query.limit, req.query.offset, 'album').then(function (result) {
+    music.search(req.params.query, req.query.limit, req.query.offset, 'album').then(function (result) {
     
         res.json(result);
     }, function (err) {
