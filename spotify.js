@@ -2295,7 +2295,7 @@ SpotifyService.prototype.login = function () {
     var self = this;
     var promise = new Promise(function (resolve, fail) {
         alert("AFFF");
-        var win = gui.Window.get(window.open('https://accounts.spotify.com/authorize/?client_id=' + this.apikeys.client_id + '&response_type=code&redirect_uri=' + encodeURI(this.apiKeys.redirect_uri) + '&scope=user-read-private%20user-read-email&state=34fFs29kd09', {
+        var win = gui.Window.get(window.open('https://accounts.spotify.com/authorize/?client_id=' + this.apikeys.client_id + '&response_type=code&redirect_uri=' + encodeURI(this.apiKeys.redirect_uri) + '&scope=streaming%20user-read-private%20user-read-email&state=34fFs29kd09', {
             "position": "center",
             "focus": true,
             "toolbar": false,
