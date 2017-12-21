@@ -301,7 +301,7 @@ SpotifyService.prototype._request = function (method, path, payload, postData) {
         
             var cachePath = path + '?offset=' + payload.offset + '&limit=' + payload.limit + '&q=' +payload.q + '&type=' + payload.type;
             
-            if (method == 'GET' && cache.isCached(cachePath)) {
+            if (method == 'GET' && cache.isCached(cachePath) && path.indexOf('/track') == -1) {
                 resolve(cache.load(cachePath));
                 return;
             }
