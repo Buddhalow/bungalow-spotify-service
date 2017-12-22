@@ -724,6 +724,7 @@ SpotifyService.prototype.getPlaylist = function (username, identifier) {
         self._request('GET', '/users/' + username + '/playlists/' + identifier).then(function (result) {
            self._request('GET', '/users/' + username + '/playlists/' + identifier + '/tracks').then(function (result2) {
             result.tracks = result2;
+            result.snapshot_id = encodeURIComponent(result.snapshot_id);
             resolve(result); 
            });
         }, function (err) {
@@ -978,7 +979,7 @@ SpotifyService.prototype.reorderTracksInPlaylist = function (username, identifie
 }
 
 
-SpotifyService.prototype.addTracksToPlaylist = function (username, identifier, uris, position) {
+SpotifyService.prototype.addTracksToPlaylistSnapshot = function (username, identifier, snapshot_id, uris, position) {
     var self = this;
     return new Promise(function (resolve, fail) {
         self._request('POST', '/users/' + username + '/playlists/' + identifier + '/tracks', null, {
@@ -1009,8 +1010,11 @@ SpotifyService.prototype.deleteTracksFromPlaylist = function (username, identifi
 
 /**
  * Returns user by id
+ * @remarks The snapshot_id is only for decorative purpose, since we currently can't retrieve tracks for a certain
+ * snapshot from the Spotify API. The reason for using the deocrative is that we use the uri spotify:user:<user_id>:playlist:<playlist_id>:snapshot:<snapshot_id>:track
+ * to allow for better editing facility
  **/
-SpotifyService.prototype.getTracksInPlaylist = function (username, identifier, offset, limit) {
+SpotifyService.prototype.getTracksInPlaylistSnapshot = function (username, identifier, snapshot_id, offset, limit) {
     var self = this;
     return new Promise(function (resolve, fail) {
         self._request('GET', '/users/' + username + '/playlists/' + identifier + '/tracks', {
@@ -2991,7 +2995,7 @@ app.get('/user/:username/playlist/:identifier', function (req, res) {
 });
 
 
-app.get('/user/:username/playlist/:identifier/track', function (req, res) {
+app.get('/user/:username/playlist/:identifier/snapshot/:snapshot_id/track', function (req, res) {
     
     
     
@@ -2999,7 +3003,7 @@ app.get('/user/:username/playlist/:identifier/track', function (req, res) {
     if (req.body) {
         body = (req.body);
     }
-    music.getTracksInPlaylist(req.params.username, req.params.identifier, req.query.offset, req.query.limit).then(function (result) {
+    music.getTracksInPlaylistSnapshot(req.params.username, req.params.identifier, req.params.snapshot_id, req.query.offset, req.query.limit).then(function (result) {
         res.json(result);
     }, function (err) {
         res.status(err).send({error: err});
@@ -3007,7 +3011,7 @@ app.get('/user/:username/playlist/:identifier/track', function (req, res) {
 });
 
 
-app.post('/user/:username/playlist/:identifier/track', function (req, res) {
+app.post('/user/:username/playlist/:identifier/snapshot/:snapshot_id/track', function (req, res) {
     
     
     
@@ -3015,7 +3019,7 @@ app.post('/user/:username/playlist/:identifier/track', function (req, res) {
     if (req.body) {
         body = (req.body);
     }
-    music.addTracksToPlaylist(req.params.username, req.params.identifier, body.tracks, body.position).then(function (result) {
+    music.addTracksToPlaylistSnapshot(req.params.username, req.params.identifier, req.params.snapshot_id, body.uris, body.position).then(function (result) {
         res.json(result);
     }, function (err) {
         res.status(err).send({error: err});
@@ -3023,14 +3027,14 @@ app.post('/user/:username/playlist/:identifier/track', function (req, res) {
 });
 
 
-app.put('/user/:username/playlist/:identifier/track', function (req, res) {
+app.put('/user/:username/playlist/:identifier/snapshot/:snapshot_id/track', function (req, res) {
     
     
     var body = {};
     if (req.body) {
         body = (req.body);
     }
-    music.reorderTracksInPlaylist(req.params.username, req.params.identifier, body.range_start, body.range_length + 1, parseInt(body.insert_before)).then(function (result) {
+    music.reorderTracksInPlaylistSnapshot(req.params.username, req.params.identifier, req.params.snapshot, body.range_start, body.range_length + 1, parseInt(body.insert_before)).then(function (result) {
         res.json(result);
     }, function (err) {
         res.status(err).send({error: err});
@@ -3511,6 +3515,18 @@ app.get('/track/:identifier', function (req, res) {
     });
 })
 
+app.get('/track/:identifier/track', function (req, res) {
+    
+    music.getTrack(req.params.identifier).then(function (result) {
+        res.json({
+            objects: [result]
+        });
+        res.send();
+    }, function (reject) {
+        res.status(500).send({error: reject});
+        res.send();
+    });
+})
 
 app.get('/artist/:artist_name/release/:release_name/track/:track_name', function (req, res) {
     
