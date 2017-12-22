@@ -299,7 +299,7 @@ SpotifyService.prototype._request = function (method, path, payload, postData) {
         
         function _do(_resolve, _fail) {
         
-            var cachePath = path + '?offset=' + payload.offset + '&limit=' + payload.limit + '&q=' +payload.q + '&type=' + payload.type;
+            var cachePath = path + '?offset=' + payload.offset + '&limit=' + payload.limit + '&q=' +payload.q + '&type=' + payload.type + '&snapshot_id=' + payload.snapshot_id;
             
             if (method == 'GET' && cache.isCached(cachePath) && path.indexOf('/track') == -1) {
                 resolve(cache.load(cachePath));
