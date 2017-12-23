@@ -177,6 +177,7 @@ SpotifyService.prototype.authenticate = function (req, resolve) {
         result.issued = new Date().getTime();
         if (error || !result.access_token) {
             resolve(error);
+            
             return;
         }
         resolve(null, result);
@@ -252,10 +253,12 @@ SpotifyService.prototype.refreshAccessToken = function () {
             self.session.issued = new Date().getTime();
             self.session.refresh_token = refresh_token;
             music.res.clearCookie('spotify');
-            
-            music.res.cookie('spotify', JSON.stringify(result));
-             console.log("Refresh", result);
-            resolve(result);
+            music._request('GET', '/me', {}, {}).then(function (user) {
+                result.user = user;
+                music.res.cookie('spotify', JSON.stringify(result));
+                console.log("Refresh", result);
+                resolve(result);
+            })
         });
     });
 }
@@ -473,7 +476,7 @@ SpotifyService.prototype._request = function (method, path, payload, postData) {
                     }
                     try {
                         if (response.statusCode < 200 ||response.statusCode > 299) {
-                                console.log(body);
+                            console.log(body);
                             fail(response.statusCode);
                             return;
                         }
@@ -963,13 +966,14 @@ SpotifyService.prototype.getTopTracksInCountry = function (code, limit, offset) 
     })
 }
 
-SpotifyService.prototype.reorderTracksInPlaylist = function (username, identifier, range_start, range_length, insert_before) {
+SpotifyService.prototype.reorderTracksInPlaylistSnapshot = function (username, identifier, snapshot_id, range_start, range_length, insert_before) {
     var self = this;
     return new Promise(function (resolve, fail) {
         self._request('PUT', '/users/' + username + '/playlists/' + identifier + '/tracks', {}, {
             range_start: range_start,
             range_length: range_length,
-            insert_before: insert_before
+            insert_before: insert_before,
+            snapshot_id: snapshot_id
         }).then(function (result) {
            resolve(result); 
         }, function (err) {
@@ -978,6 +982,18 @@ SpotifyService.prototype.reorderTracksInPlaylist = function (username, identifie
     });
 }
 
+SpotifyService.prototype.replaceTracksInPlaylistSnapshot = function (username, identifier, snapshot_id, uris) {
+    var self = this;
+    return new Promise(function (resolve, fail) {
+        self._request('PUT', '/users/' + username + '/playlists/' + identifier + '/tracks', {}, {
+            uris: uris
+        }).then(function (result) {
+           resolve(result); 
+        }, function (err) {
+            fail(err);
+        });
+    });
+}
 
 SpotifyService.prototype.addTracksToPlaylistSnapshot = function (username, identifier, snapshot_id, uris, position) {
     var self = this;
@@ -2572,11 +2588,14 @@ app.get('/authenticate', function (req, res) {
         }
         console.log("success");
         res.clearCookie('spotify');
-        var strSession = JSON.stringify(session);
-        res.cookie('spotify', strSession);
         res.statusCode = 200;
-        res.json(session);
-        res.send();
+        music._request('GET', '/me', {}, {}).then(function (result) {
+            session.user = result;
+            var strSession = JSON.stringify(session);
+            res.cookie('spotify', strSession);
+            res.json(session);
+            res.send();
+        })
     });
 }); 
 
@@ -3034,11 +3053,19 @@ app.put('/user/:username/playlist/:identifier/snapshot/:snapshot_id/track', func
     if (req.body) {
         body = (req.body);
     }
-    music.reorderTracksInPlaylistSnapshot(req.params.username, req.params.identifier, req.params.snapshot, body.range_start, body.range_length + 1, parseInt(body.insert_before)).then(function (result) {
-        res.json(result);
-    }, function (err) {
-        res.status(err).send({error: err});
-    });
+    if ('range_start' in body) {
+        music.reorderTracksInPlaylistSnapshot(req.params.username, req.params.identifier, req.params.snapshot, body.range_start, body.range_length + 1, parseInt(body.insert_before)).then(function (result) {
+            res.json(result);
+        }, function (err) {
+            res.status(err).send({error: err});
+        });
+    } else {
+        music.replaceTracksInPlaylistSnapshot(req.params.username, req.params.identifier, req.params.snapshot_id, body.uris).then(function (result) {
+            res.json(result);
+        }, function (err) {
+            res.status(500).send({error: err});
+        });
+    }
 });
 
 
